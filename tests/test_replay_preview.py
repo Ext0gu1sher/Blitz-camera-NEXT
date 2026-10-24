@@ -8,7 +8,7 @@ import unittest
 import zipfile
 
 from blitzcam.replay_preview import ReplayPreview, heightmap_corner_bytes
-from blitzcam.preview_assets import model_metadata
+from blitzcam.preview_assets import model_metadata, VENDOR
 from tests.fixtures.replay_data import replay_data
 
 
@@ -55,6 +55,8 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(struct.unpack_from('<H',out,2*(r*n+c))[0],(r*n+min(n-c,n-1))%65535)
         with self.assertRaises(ValueError):heightmap_corner_bytes(raw[:-1])
 
+    @unittest.skipUnless((VENDOR/'data/models.pb').is_file(),
+                         'Optional preview metadata missing; use tools/restore_preview_metadata.py')
     def test_pinned_model_origins_and_mounted_ids(self):
         m=model_metadata(6929)
         self.assertEqual(m['model_origins']['track'],[0,0,0])

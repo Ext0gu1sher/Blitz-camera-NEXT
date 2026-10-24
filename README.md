@@ -167,6 +167,21 @@ powershell -ExecutionPolicy Bypass -File tools/build_position_hook.ps1
 
 原生构建脚本使用 `tools/zig-x86_64-windows-0.15.2/zig.exe`，运行独立模拟对象测试、核对 C/Python 布局，并生成按内容哈希命名的 DLL 和清单。这些离线测试不会加载游戏。更完整的命令见 `python -m blitzcam --help`。
 
+## 源码版本与本地依赖
+
+Git 记录应用源码、测试、构建脚本、研究脚本与笔记、第三方许可及固定版本清单。`output`、`dist`、回放、日志、下载工具链、外部源码检出和本机依赖目录不入库；发行包与个人项目继续保留在本机。仓库保留当前清单引用的五个原生运行组件，后续更新原生组件时需同时提交清单及其引用的哈希 DLL。
+
+克隆后可用 Python 3.11 运行上述离线测试；安装 Node.js 后会额外执行浏览器预览数据验证。与本地便携包和车型元数据相关的集成测试在依赖缺失时明确跳过。完整预览和打包仍需准备本机转换依赖，版本与许可见 `blitzcam/preview_vendor/NOTICE.txt`；工具链来源与校验值见 `tools/*-provenance.json`。
+
+车型元数据不随源码上传。需要完整预览集成测试时，准备 Agent `v0.4.9` 的固定提交 `8dcec2c6463f23116871157ef6d64985875efd67` 源码（来源见 `blitzcam/preview_vendor/provenance.json`），随后执行：
+
+```powershell
+python tools/restore_preview_metadata.py <本机Agent源码目录>
+python -X utf8 -B -m unittest discover -s tests -v
+```
+
+恢复工具先核对 `models.pb` 和 `tanks.pb` 的 SHA-256，两个文件全部匹配后才写入已忽略的本地依赖目录；不下载文件，不访问游戏。
+
 ## 研究记录
 
 历史笔记按实验时间保留，当前 0.3.0 的新增通道状态见恢复实验第 18 节：
