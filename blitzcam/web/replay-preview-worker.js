@@ -10,6 +10,14 @@ self.onmessage=async ({data})=>{
     })();
     const engine=await ready;
     const b=new Uint8Array(data.bytes);
-    self.postMessage({id:data.id,bundle:{engine,playback:JSON.parse(parsePlayback(b)),result:JSON.parse(parseResult(b)),ai:JSON.parse(parseAiReview(b))}});
+    let playback=JSON.parse(parsePlayback(b));
+    // prop2 stores a fraction of the mounted gun's yaw-dependent pitch range.
+    // Without these anchors Agent substitutes hull pitch for barrel elevation.
+    // Follow WotbTools' roster -> limits -> second parse flow, off the UI thread.
+    const response=await fetch('/api/preview/pitch-limits',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({vehicles:playback.vehicles.map(({eid,nickname,tank_id,turret_local,gun_local})=>({eid,nickname,tank_id,turret_local,gun_local}))})});
+    const aim=await response.json();if(!response.ok)throw Error(aim.error||'炮管俯仰参数读取失败。');
+    if(Object.keys(aim.limits).length)playback=JSON.parse(parsePlayback(b,undefined,JSON.stringify(aim.limits)));
+    self.postMessage({id:data.id,bundle:{engine,aim:{anchored:aim.anchored,missing:aim.missing},playback,result:JSON.parse(parseResult(b)),ai:JSON.parse(parseAiReview(b))}});
   }catch(error){self.postMessage({id:data.id,error:String(error.message||error)});}
 };

@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const timing=require('../blitzcam/web/preview-time.js');
+const {enterFixture}=require('./ui_fixture.cjs');
 const asymmetric={mode:'curve',interpolation:'smooth',camera_clock:'shooting',keyframes:[{progress:0,rate:1},{progress:1,rate:.25}]};
 assert.equal(timing.rateAt(asymmetric,.5),.625);assert.equal(timing.integral(asymmetric,.5),.4296875);
 assert.equal(timing.atShooting(10,asymmetric,.5).replayElapsed,4.296875);
@@ -173,7 +174,7 @@ fs.mkdirSync(out,{recursive:true});
     await browserPage.locator('.sequence-panel').screenshot({path:path.join(out,'timeline-fixed-quarter.png')});
     // Reopen the main page: independent parameter keys must survive serialization.
     const persisted=JSON.stringify(fixedState.camera_tracks);
-    await browserPage.reload();await browserPage.waitForSelector('.seq-key[data-channel=zoom]');
+    await browserPage.reload();await browserPage.waitForSelector('.seq-key[data-channel=zoom]');await enterFixture(browserPage);
     assert.equal(await browserPage.locator('.seq-key[data-channel=zoom]').count(),4);
     assert.equal(JSON.stringify((await (await browserPage.request.get(base+'/api/state')).json()).project.camera_tracks),persisted);
     await browserPage.locator('#tabSpeed').click();

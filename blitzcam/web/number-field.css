@@ -1,10 +1,17 @@
 /* Numbers read as values until the user explicitly enters text mode. */
 .number-field{display:inline-flex;position:relative;min-width:58px;width:80px;vertical-align:middle;flex-shrink:0;font:10px var(--num,Consolas,monospace)}
-.number-field>.number-value{display:block;width:100%;min-width:0;margin:0;padding:3px 5px;border:1px solid transparent;border-bottom:1px dotted #67764680;border-radius:2px;background:transparent;box-shadow:none;color:var(--lime,#cfed83);font:inherit;text-align:left;white-space:nowrap;cursor:move;touch-action:none;user-select:none}
+.number-field>.number-value{display:block;width:100%;min-width:0;min-height:26px;margin:0;padding:3px 25px 3px 5px;border:1px solid transparent;border-bottom:1px dotted #67764680;border-radius:2px;background:transparent;box-shadow:none;color:var(--lime,#cfed83);font:inherit;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:move;touch-action:none;user-select:none}
 .number-field>.number-value:hover:not(:disabled),.number-field.number-dragging>.number-value{background:#cfed8310;border-bottom-color:var(--lime,#cfed83);color:#e6f7be}
 .number-field>.number-value:disabled{cursor:default;opacity:.45;border-color:transparent}
 .number-field[data-readonly=true]>.number-value{opacity:.8;color:inherit}
-.number-field>.number-input{display:none;width:100%;min-width:0;margin:0;padding:3px 5px;border:1px solid #637f3d;border-radius:3px;background:#161616;color:var(--lime,#cfed83);font:inherit;box-sizing:border-box}
+.number-field>.number-input{display:none;width:100%;min-width:0;height:26px;margin:0;padding:3px 25px 3px 5px;border:1px solid #637f3d;border-radius:3px;background:#161616;color:var(--lime,#cfed83);font:inherit;box-sizing:border-box}
+.number-field>.number-steps{position:absolute;right:1px;top:1px;bottom:1px;width:19px;display:grid;grid-template-rows:1fr 1fr;border-left:1px solid #6b774536;border-radius:0 2px 2px 0;overflow:hidden}
+.number-steps>.number-step{display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:0;background:#cfed8309;color:#bacb98;font:11px/1 var(--num,Consolas,monospace);touch-action:manipulation}
+.number-steps>.number-step+button{border-top:1px solid #6b774536}
+.number-steps>.number-step:hover:not(:disabled){background:#cfed8326;color:#e6f7be}
+.number-steps>.number-step:active:not(:disabled){background:#cfed8340}
+.number-steps>.number-step:disabled{opacity:.25;cursor:default}
+.number-steps>.number-step:focus-visible{outline-offset:-2px}
 .number-field.number-editing>.number-value{display:none}
 .number-field.number-editing>.number-input{display:block}
 .number-field>.number-input[aria-invalid=true]{border-color:var(--danger,#ff9b92)}

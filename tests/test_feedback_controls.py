@@ -308,17 +308,58 @@ class FeedbackControlsTests(unittest.TestCase):
                 self.write_replay(self.replay, start=raw_start)
                 self.request('/api/projects/new', {'name':f'默认项目导入 {index}'})
                 before = deepcopy(self.app.project.to_dict())
-                self.assertIsNone(self.app.project.replay_timeline)
+                self.assertTrue(self.app.project.replay_timeline['starter_keyframes_pending'])
                 info = file_timeline(self.replay)
                 self.app._bind_opened_replay(info)
                 t = self.app.project.replay_timeline
                 self.assertAlmostEqual(t['work_start_sec'], info['battle_start_sec'])
                 self.assertAlmostEqual(t['work_end_sec'], min(300.,info['battle_start_sec']+8.))
                 self.assertGreater(t['work_end_sec'], t['work_start_sec'])
-                self.assertEqual(self.app.project.to_dict()['keyframes'], before['keyframes'])
+                frames = self.app.project.to_dict()['keyframes']
+                self.assertAlmostEqual(frames[0]['time_sec'], t['work_start_sec'])
+                self.assertAlmostEqual(frames[-1]['time_sec'], t['work_end_sec'])
+                self.assertNotIn('starter_keyframes_pending', t)
+                for old, new in zip(before['keyframes'], frames):
+                    self.assertEqual({k:v for k,v in old.items() if k!='time_sec'},
+                                     {k:v for k,v in new.items() if k!='time_sec'})
                 saved = self.app.project.to_dict()
+                self.app._bind_opened_replay(info)
+                self.assertEqual(self.app.project.to_dict(), saved)
                 self.app.open_project(self.app.project_path)
                 self.assertEqual(self.app.project.to_dict(), saved)
+
+    def test_starter_marker_survives_draft_save_and_reopen_then_aligns_all_tracks(self):
+        from blitzcam.project import edit_project
+        self.app.new_project_file('保存后载入')
+        p = self.app.project
+        self.app.set_project(edit_project({'keyframes': controls(p), 'camera_track_controls': track_controls(p),
+            'shooting_mode': 'replay', 'replay_timeline': deepcopy(p.replay_timeline), 'replay_speed': p.replay_speed}))
+        self.app.open_project(self.app.project_path)
+        self.assertTrue(self.app.project.replay_timeline['starter_keyframes_pending'])
+        self.app._bind_opened_replay(file_timeline(self.replay))
+        for rows in track_controls(self.app.project).values():
+            self.assertEqual([k['time_sec'] for k in rows], [15.75, 23.75])
+
+    def test_edited_starter_keys_are_never_repositioned(self):
+        self.app.new_project_file('已修改的默认点')
+        data = self.app.project.to_dict()
+        data['keyframes'][0]['position'][0] += 1
+        self.app.set_project(validate_project(data))
+        self.assertNotIn('starter_keyframes_pending', self.app.project.replay_timeline)
+        before = track_controls(self.app.project)
+        self.app._bind_opened_replay(file_timeline(self.replay))
+        self.assertEqual(track_controls(self.app.project), before)
+
+    def test_starter_keys_wait_for_known_boundary_and_honor_manual_start(self):
+        self.app.new_project_file('缺少开始事件')
+        self.write_replay(self.replay, event=False)
+        self.app._bind_opened_replay(file_timeline(self.replay))
+        self.assertTrue(self.app.project.replay_timeline['starter_keyframes_pending'])
+        self.assertEqual([k.time_sec for k in self.app.project.keyframes], [0.,8.])
+        settings = self.request('/api/settings')
+        self.request('/api/settings', {**settings, 'replay_keyframe_start_seconds': 5.})
+        self.app._bind_opened_replay(file_timeline(self.replay))
+        self.assertEqual([k.time_sec for k in self.app.project.keyframes], [5.,13.])
 
     def test_manual_setting_http_state_updates_and_restores_automatic(self):
         settings=self.request('/api/settings')

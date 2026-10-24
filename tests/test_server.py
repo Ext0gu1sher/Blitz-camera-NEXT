@@ -244,5 +244,15 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as exc:self.request('/api/state',None,{'Host':'example.invalid'})
         self.assertEqual(exc.exception.code,403)
 
+    def test_preview_pitch_limits_pass_unicode_roster_without_touching_project(self):
+        roster=[{'eid':7,'nickname':'中文玩家','tank_id':6929,'turret_local':45,'gun_local':1041}]
+        before=self.request('/api/export')
+        expected={'limits':{'中文玩家':{'dep':8,'ele':24}},'anchored':[7],'missing':[]}
+        with patch('blitzcam.preview_assets.playback_pitch_limits',return_value=expected) as resolve:
+            self.assertEqual(self.request('/api/preview/pitch-limits',{'vehicles':roster}),expected)
+            resolve.assert_called_once_with(roster)
+        self.assertEqual(self.request('/api/export'),before)
+        with self.assertRaises(urllib.error.HTTPError):self.request('/api/preview/pitch-limits',{})
+
 
 if __name__=='__main__':unittest.main()

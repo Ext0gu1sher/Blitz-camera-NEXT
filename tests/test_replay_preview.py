@@ -8,7 +8,7 @@ import unittest
 import zipfile
 
 from blitzcam.replay_preview import ReplayPreview, heightmap_corner_bytes
-from blitzcam.preview_assets import model_metadata, VENDOR
+from blitzcam.preview_assets import model_metadata, playback_pitch_limits, pitch_range, VENDOR
 from tests.fixtures.replay_data import replay_data
 
 
@@ -19,6 +19,28 @@ class PreviewTests(unittest.TestCase):
         result=subprocess.run(['node',str(script)],capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertTrue(json.loads(result.stdout)['passed'])
+
+    @unittest.skipUnless(shutil.which('node'),'Node required for preview aim validation')
+    def test_barrel_direction_combines_hull_turret_and_elevation_without_drift(self):
+        script=Path(__file__).parent/'fixtures/replay_aim_validation.mjs'
+        result=subprocess.run(['node',str(script)],capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue(json.loads(result.stdout)['passed'])
+
+    def test_pitch_range_keeps_front_back_and_transition_in_degrees(self):
+        f=lambda tag,value:bytes([(tag<<3)|5])+struct.pack('<f',value)
+        front=f(1,-16)+f(2,4)+f(3,30)
+        back=f(1,-10)+f(2,2)+f(3,40)
+        raw=f(1,-20)+f(2,8)+bytes([26,len(front)])+front+bytes([34,len(back)])+back+f(5,12)
+        self.assertEqual(pitch_range(raw),{'dep':8,'ele':20,'front':{'min':-16,'max':4,'range':30},
+                                         'back':{'min':-10,'max':2,'range':40},'transition':12})
+        self.assertIsNone(pitch_range(None))
+        self.assertIsNone(pitch_range(f(1,float('nan'))))
+
+    def test_pitch_roster_rejects_invalid_inputs(self):
+        valid={'eid':1,'tank_id':6929,'turret_local':45,'gun_local':1041,'nickname':'test'}
+        for rows in (None,{},[valid]*65,[{**valid,'tank_id':True}],[{**valid,'gun_local':-1}],[{**valid,'nickname':None}]):
+            with self.subTest(rows=str(rows)[:70]),self.assertRaises(ValueError):playback_pitch_limits(rows)
 
     def test_selected_source_is_bound_to_full_content_hash_and_opaque_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -63,4 +85,20 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(m['configs'][0]['turret_local'],45)
         self.assertEqual(m['configs'][0]['gun_local'],1041)
         self.assertAlmostEqual(m['model_origins']['turret'][2],2.140294,places=5)
+        self.assertEqual(m['configs'][0]['pitch_limits'],{'dep':8,'ele':24})
         self.assertIsNone(model_metadata(999999))
+
+    @unittest.skipUnless((VENDOR/'data/models.pb').is_file(), 'Optional preview metadata missing')
+    def test_pitch_limits_follow_mounted_gun_and_keep_unicode_names(self):
+        rows=[{'eid':i,'tank_id':1,'turret_local':0,'gun_local':gun,'nickname':nick}
+              for i,gun,nick in [(1,0,'中文玩家'),(2,5,'other'),(3,999,'unknown')]]
+        result=playback_pitch_limits(rows)
+        self.assertEqual(result['anchored'],[1,2]);self.assertEqual(result['missing'],[3])
+        self.assertEqual(result['limits']['中文玩家'],{'dep':6,'ele':17})
+        self.assertEqual(result['limits']['other'],{'dep':8,'ele':20,'back':{'min':-20,'max':-2,'range':15}})
+        # Older replays can omit comp broadcasts: one known configuration is
+        # usable, but multiple configurations must not be guessed.
+        unknown=playback_pitch_limits([{'eid':4,'tank_id':1,'nickname':'ambiguous'},
+                                      {'eid':5,'tank_id':6929,'nickname':'single','turret_local':None,'gun_local':None}])
+        self.assertEqual(unknown['anchored'],[5]);self.assertEqual(unknown['missing'],[4])
+        self.assertEqual(unknown['limits']['single'],{'dep':8,'ele':24})

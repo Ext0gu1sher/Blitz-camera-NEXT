@@ -29,5 +29,12 @@
     "commit": "0a9da93a0074a95af406db3468e6a81a5a6b139f",
     "release_zip_sha256": "8170ba26b289e1952ed04d92f572a596a0503c988b86316c008b57a3fbec96f6"
   },
-  "agent_source_scope": "Asset exporters and metadata only; browser parser is recorded under replay_engine"
+  "agent_source_scope": "Asset exporters and metadata only; browser parser is recorded under replay_engine",
+  "local_modifications": {
+    "2026-10-24": {
+      "export_map_glb.py": "Preserve inherited customCullMode and enabled preset overrides; export resolved client forward-pass culling, keyed separately in the material cache.",
+      "scenery_culling.py": "Local reader for client material forward-pass, preset and quality-template culling states.",
+      "../web/vendor/wotbtools/sceneryAssembly.js": "Retain exported culling through custom shader conversion and instancing instead of forcing every scenery material double-sided."
+    }
+  }
 }

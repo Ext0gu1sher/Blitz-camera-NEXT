@@ -104,7 +104,7 @@ fs.mkdirSync(out,{recursive:true});
   await reconnected.route('**/api/state',route=>route.fulfill({json:restored}));
   await reconnected.goto(base+'/');
   await reconnected.waitForFunction(()=>document.querySelector('#openedReplayFile').textContent.includes('电影 A & B'));
-  assert.match(await reconnected.locator('#replayLaunchMessage').innerText(),/已读取游戏启动参数/);
+  assert.match(await reconnected.locator('#replayLaunchMessage').innerText(),/已读取回放启动信息/);
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,layout,source:chosen,errors},null,2));
   console.log('Replay open UI acceptance passed.');

@@ -23,11 +23,12 @@ let applicationSettings=null,settingsLoading=false;
 let nativeHostState=null;
 let globalKeysEdited=false;
 let startupServiceError='',startupSamples={ready:false,error:''};
+let homeItems=[],homeLoading=false,homeError='',homeRequest=0,homeOpening=false,homeMenuItem=null,homeMenuTrigger=null;
 function setIcon(button,name){const u=button?.querySelector("use");if(u)u.setAttribute("href","#"+name);}
 function syncReplayPreview(){
   replayPreviewPane?.update({mode:state.shootingMode,time:state.previewTime,tracks:state.tracks,
     smooth:$("interpolationSelect").value==='smooth',easing:$("easingSelect").value,
-    samples:state.samples,replayFile:state.timeline?.replay_file});
+    samples:state.samples,replayFile:state.timeline?.replay_file,projectPath:state.projectPath});
 }
 function mountReplayPreview(){
   if(replayPreviewPane||!window.BlitzReplayPreview)return;
@@ -35,7 +36,7 @@ function mountReplayPreview(){
     locked:()=>state.busy||state.playback.active||!state.serviceReady,
     pause:()=>stopPlayback(),
     ready:()=>restorePreviewSession(),
-    bindSource:info=>{stopPlayback();applyReplayInfo(info);if(state.timeline?.replay_file!==info.replay_file)throw Error('所选回放未能绑定现有时间轴。请先检查关键帧是否超出新回放长度。');notify('预览已绑定所选回放，关键帧时间原样保留。');},
+    bindSource:info=>{stopPlayback();if(!applyReplayInfo(info))throw Error('所选回放未能绑定现有时间轴。请先检查关键帧是否超出新回放长度。');notify('预览已绑定所选回放。');},
     record:(pose,time)=>{
       if(isCameraOnly()||state.busy||state.playback.active)return;
       stopPlayback();const values={x:pose.position[0],y:pose.position[1],z:pose.position[2],yaw:pose.yaw,pitch:pose.pitch,roll:pose.roll,zoom:pose.zoom};
@@ -184,6 +185,7 @@ function updateButtons() {
   $("timelineSlider").disabled = state.samples.length < 2&&!sceneReady;
   replayPreviewPane?.syncFlightUI();
   updateSettingsControls();
+  updateHomeControls();
   if (!connected || !hasCamera) $("captureButton").title = "连接客户端并暂停本地回放后可用。";
   else if (!paused) $("captureButton").title = "请先在游戏中暂停回放，以记录当前摄像机属性。";
   else if(captureBlocked)$("captureButton").title=captureGuard.message;
@@ -291,6 +293,7 @@ function loadProject(data) {
   const switched=state.projectPath!==data.project_path;
   state.projectPath=data.project_path;
   if(switched){
+    state.appliedLaunchId=data.replay_launch?.state==='launched'?data.replay_launch.id:null;
     const saved=BlitzEditorSession.newest(data.editor_state,BlitzEditorSession.readLocal(localStorage,state.projectPath));
     pendingEditorRestore=saved||null;pendingPreviewRestore=saved?.preview||null;lastEditorSignature='';
     state.previewTime=Number.isFinite(saved?.timeline?.playhead)?Math.max(0,saved.timeline.playhead):0;
@@ -303,9 +306,10 @@ function loadProject(data) {
   state.shootingMode=data.project?.shooting_mode || (data.project?.replay_timeline?"replay":"camera_only");
   const end=Math.max(1,...Object.values(state.tracks).flat().map(k=>k.time_sec));
   const first=Math.max(0,Math.min(...Object.values(state.tracks).flat().map(k=>k.time_sec)));
-  state.timeline=copy(data.project?.replay_timeline || {time_basis:'replay',duration_sec:Math.max(state.replayInfo?.duration_sec??0,end,first+.5),work_start_sec:first,work_end_sec:Math.max(end,first+.5)});
+  state.timeline=copy(data.project?.replay_timeline || {time_basis:'replay',duration_sec:Math.max(end,first+.5),work_start_sec:first,work_end_sec:Math.max(end,first+.5)});
+  $("replayFilePath").value=state.timeline.replay_file||'';
   const seqSource=$("sequenceEditor").querySelector('[data-source]');
-  seqSource.textContent=seqSource.title=data.project?.replay_timeline?'已保存的整场回放时间轴':state.replayInfo?`长度来源：启动回放 ${state.replayInfo.name}，请确认与当前回放一致。`:'全片长度待确认：读取回放文件以取得全片长度。';
+  seqSource.textContent=seqSource.title=data.project?.replay_timeline?.replay_file?'已保存的整场回放时间轴':'全片长度待确认：读取回放文件以取得全片长度。';
   updatePreviewRange();
   state.savedControls = copy(state.controls);
   state.pendingProject = null;
@@ -350,17 +354,20 @@ async function refreshState(forceProject = false) {
   const hash = JSON.stringify(data.project || null);
   const interacting=editorInteracting();
   const editing=state.dirty||interacting;
-  if (!state.loaded || forceProject || (!editing && hash !== state.projectHash)) loadProject(data);
-  else if (editing && hash !== state.projectHash) {
+  if (!state.loaded || forceProject || (!editing && (state.projectPath!==data.project_path||hash !== state.projectHash))) loadProject(data);
+  else if (editing && (state.projectPath!==data.project_path||hash !== state.projectHash)) {
     state.pendingProject = data;
     $("externalChange").hidden = false;
     $("saveButton").title = $("saveButton").ariaLabel = "覆盖并保存";
   }
-  if (!interacting && !state.busy && !state.playback.active && data.replay_launch?.state==='launched' &&
-      data.replay_launch.id!==state.appliedLaunchId) {
-    state.appliedLaunchId=data.replay_launch.id;
-    const info=data.replay_launch.info;
-    if(!isCameraOnly()&&info && state.timeline?.replay_file!==info.replay_file) applyReplayInfo(info);
+  // Merge a fresh launch's source into this project's unsaved edits only after
+  // the service bound it. Remembered launches never own a different project.
+  const launch=data.replay_launch;
+  if(!interacting&&!state.busy&&!state.playback.active&&launch?.state==='launched'&&
+      data.project_path===state.projectPath&&launch.project_path===state.projectPath&&launch.id!==state.appliedLaunchId){
+    state.appliedLaunchId=launch.id;
+    const info=launch.info;
+    if(!isCameraOnly()&&info&&data.project?.replay_timeline?.replay_file===info.replay_file&&state.timeline?.replay_file!==info.replay_file)applyReplayInfo(info);
   }
 }
 
@@ -810,7 +817,11 @@ document.addEventListener("keydown", event => {
   }
   const k=event.key.toLowerCase();
   const textEntry=event.target.closest('input,textarea,[contenteditable=true]');
-  if((event.ctrlKey||event.metaKey)&&['z','y'].includes(k)&&(!textEntry||event.target.closest('#paneSpeed,#keyInspector,.ce-grid2,#easeContinuous'))){event.preventDefault();window.BlitzNumbers?.finish();finishEaseDrag?.(false);if(textEntry)event.target.blur();stopPlayback();sequenceEditor?.action(k==='y'||event.shiftKey?'redo':'undo');return;}
+  if((event.ctrlKey||event.metaKey)&&['z','y'].includes(k)&&(!textEntry||event.target.closest('#paneSpeed,#keyInspector,.ce-grid2,#easeContinuous'))){
+    event.preventDefault();
+    if(k==='z'&&!event.shiftKey&&window.BlitzNumbers?.active){BlitzNumbers.finish(true,true);return;}
+    window.BlitzNumbers?.finish();finishEaseDrag?.(false);if(textEntry)event.target.blur();stopPlayback();sequenceEditor?.action(k==='y'||event.shiftKey?'redo':'undo');return;
+  }
   if (event.target.closest('input,select,textarea,button,[contenteditable=true]')) return;
   if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&k==='s'&&!event.repeat){event.preventDefault();sequenceEditor?.action('snap');return;}
   if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&(k==='i'||k==='o')&&!isCameraOnly()){
@@ -982,7 +993,7 @@ $("playProjectReplay").onclick=()=>action(async()=>{
 });
 $("useCurrentReplay").onclick=()=>{if(!state.replayInfo)return notify('未取得启动回放文件，请填写回放文件路径读取长度。',true);applyReplayInfo(state.replayInfo);};
 function applyReplayInfo(info){
-  if(isCameraOnly())return;
+  if(isCameraOnly())return false;
   const previous=sequenceEditor.doc.timeline,fit=previous.replay_file!==info.replay_file||previous.duration_sec!==info.duration_sec;
   const bound=sequenceEditor.edit(()=>{
     const t=sequenceEditor.doc.timeline;t.duration_sec=info.duration_sec;t.replay_file=info.replay_file;
@@ -990,17 +1001,27 @@ function applyReplayInfo(info){
     for(const name of ['battle_start_sec','battle_start_raw_sec','replay_origin_sec','battle_start_status','battle_start_reason']){delete t[name];if(name in info)t[name]=info[name];}
     if(t.work_end_sec>t.duration_sec){t.work_start_sec=0;t.work_end_sec=Math.min(8,t.duration_sec);}
     const minimum=finite(state.replayKeyframeStartSeconds)?state.replayKeyframeStartSeconds:info.battle_start_status==='identified'?info.battle_start_sec:null;
+    if(t.starter_keyframes_pending&&finite(minimum)&&minimum<t.duration_sec){
+      const keys=Object.values(sequenceEditor.doc.tracks).flat(),first=Math.min(...keys.map(k=>k.time_sec)),last=Math.max(...keys.map(k=>k.time_sec));
+      const scale=last>first?Math.min(1,(t.duration_sec-minimum)/(last-first)):1;
+      const aligned=time=>Math.min(t.duration_sec,minimum+(time-first)*scale);
+      for(const key of keys)key.time_sec=aligned(key.time_sec);
+      if(sequenceEditor.doc.speed.time_range)sequenceEditor.doc.speed.time_range={start_sec:minimum,end_sec:aligned(last)};
+      t.work_start_sec=minimum;t.work_end_sec=aligned(last);delete t.starter_keyframes_pending;
+    }
     if(finite(minimum)&&t.work_start_sec<minimum&&minimum<t.duration_sec){
       const length=t.work_end_sec-t.work_start_sec;t.work_start_sec=minimum;
       if(t.work_end_sec<=minimum)t.work_end_sec=Math.min(t.duration_sec,minimum+length);
     }
   });
-  if(bound&&fit)sequenceEditor.fit();
+  if(!bound)return false;
+  if(fit)sequenceEditor.fit();
   $("replayFilePath").value=info.replay_file;
   if(state.timeline?.replay_file===info.replay_file&&state.timeline.duration_sec===info.duration_sec){
     const src=$("sequenceEditor").querySelector('[data-source]');
     src.textContent=src.title=info.verification==='runtime_replay'?`游戏当前回放：${info.name} · ${info.duration_sec.toFixed(3)} 秒`:info.source==='blitz_camera'?`本次从 Blitz Camera 打开：${info.name} · ${info.duration_sec.toFixed(3)} 秒`:`长度来源：${info.name} · 请确认与当前回放一致。`;
   }
+  return true;
 }
 updateButtons(); updateTimingExplanation(); poll(); setInterval(poll, 500);
 
@@ -1017,6 +1038,7 @@ function updateSpeedExplanation(){
   updateButtons();drawSpeedGraph();
 }
 function renderSpeedRows(){
+ if(sequenceEditor?.numberEdit)return;
  if(BlitzNumbers.active?.closest('#speedRows'))return;
  const body=$("speedRows");body.replaceChildren();
  state.speedFrames.forEach((f,i)=>{
@@ -1145,7 +1167,6 @@ document.querySelectorAll(".vsplit,.hsplit").forEach(el=>{
   el.addEventListener("dblclick",()=>{splitV=splitDefaults.v;splitH=splitDefaults.h;applySplits();persistSplits();});
 });
 
-let homeSortAsc = true, homeItems = [],homeLoading=false,homeError='';
 function relTime(iso) {
   const d = (Date.now() - Date.parse(iso)) / 1000;
   if (!Number.isFinite(d)) return '—';
@@ -1161,6 +1182,7 @@ function sizeText(n) {
   return (n / 1048576).toFixed(1) + ' MB';
 }
 function showHome(on) {
+  closeHomeMenu();
   if(state.settingsOpen)closeSettings();
   state.home = on;
   $("homeView").hidden = !on; $("wb").hidden = on;
@@ -1169,40 +1191,127 @@ function showHome(on) {
   else requestAnimationFrame(()=>restoreEditorSession());
 }
 async function renderHome() {
+  const request=++homeRequest;
   homeLoading=true;homeError='';
-  try { homeItems = (await api("/api/projects/recent")).projects || []; } catch(error) { homeError=error.message; }
-  finally{homeLoading=false;}
   paintHome();
+  try {
+    const result=await api('/api/projects/recent');
+    if(request===homeRequest)homeItems=result.projects||[];
+  } catch(error) { if(request===homeRequest)homeError=error.message; }
+  finally{if(request===homeRequest){homeLoading=false;paintHome();}}
+}
+function homeNode(tag,className,text) {
+  const node=document.createElement(tag);node.className=className;
+  if(text!==undefined)node.textContent=text;
+  return node;
+}
+function homeIcon(name) {
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('class','ic');svg.setAttribute('aria-hidden','true');
+  const use=document.createElementNS(svg.namespaceURI,'use');use.setAttribute('href','#'+name);svg.append(use);
+  return svg;
+}
+function homeReplaySummary(filename) {
+  if(!filename)return {label:'未关联回放',context:''};
+  const name=filename.split(/[\\/]/).at(-1),stem=name.replace(/\.wotbreplay$/i,'');
+  const standard=stem.match(/^(\d{4})(\d{2})(\d{2})_\d{4}__(.+)_\d{10,}$/);
+  // Only shorten the game's standard file names. Renamed replays keep their name.
+  if(!standard)return {label:stem,context:''};
+  const date=`${standard[2]}.${standard[3]}`,body=standard[4];
+  const vehicle=body.match(/^(.*?)_((?:[A-Z][a-z]?\d+|Oth\d+)_.+)$/);
+  return vehicle?{label:vehicle[2].replace(/^[^_]+_/,'').replace(/_/g,' '),context:`${date} · ${vehicle[1]}`}:
+    {label:body.replace(/_/g,' '),context:date};
+}
+function homeMode(item){return item.shooting_mode==='camera_only'?'仅镜头':item.shooting_mode==='replay'?'随对局':'—';}
+function updateHomeControls() {
+  const locked=state.busy||homeOpening||!state.serviceReady||state.playback.active;
+  for(const id of ['homeNew','homeNewName','homeOpen'])$(id).disabled=locked;
+  document.querySelectorAll('.home-project-open').forEach(button=>{button.disabled=locked||button.dataset.exists!=='true';});
+  document.querySelectorAll('#homeProjectMenu [data-home-action]').forEach(button=>{button.disabled=locked&&button.dataset.homeAction!=='info';});
+}
+async function switchHomeProject(next) {
+  if(state.busy||homeOpening||!state.serviceReady||state.playback.active)return;
+  closeHomeMenu();homeOpening=true;updateHomeControls();
+  try{await guardDirty(next);}catch(error){notify(error.message||'项目未能打开，请重试。',true);}
+  finally{homeOpening=false;updateHomeControls();}
 }
 function paintHome() {
-  const q = ($("homeFilter").value || '').trim().toLowerCase();
-  const rows = (homeItems || []).filter(i => !q || i.name.toLowerCase().includes(q));
-  rows.sort((a, b) => homeSortAsc ? a.name.localeCompare(b.name, 'zh') : b.name.localeCompare(a.name, 'zh'));
-  $("homeSortDir").textContent = homeSortAsc ? '↑' : '↓';
-  const tb = $("homeRows"); tb.replaceChildren();
-  $("homeEmpty").hidden = rows.length > 0;
-  for (const item of rows) {
-    const tr = document.createElement('tr');
-    if (!item.exists) tr.className = 'missing';
-    const cells = [item.name, item.exists ? relTime(item.last_opened) : '文件不存在',
-                   item.replay || '—', item.shooting_mode === 'camera_only' ? '仅镜头' : '随对局',
-                   item.exists ? sizeText(item.size_bytes) : '—'];
-    cells.forEach((text, i) => { const td = document.createElement('td'); td.textContent = text; if (i === 4) td.className = 'num'; tr.append(td); });
-    const op = document.createElement('td');
-    const rm = document.createElement('button'); rm.className = 'home-remove'; rm.textContent = '移出列表';
-    rm.title = '从最近列表移除，保留项目文件'; rm.setAttribute('aria-label', `将 ${item.name} 移出最近列表`);
-    rm.addEventListener('click', e => { e.stopPropagation(); action(async () => { await api("/api/projects/forget", {path: item.path}); await renderHome(); }); });
-    op.append(rm);
-    if (item.exists) {
-      const del = document.createElement('button'); del.className = 'home-delete'; del.textContent = '删除';
-      del.title = '删除项目文件'; del.setAttribute('aria-label', `删除项目 ${item.name}`);
-      del.addEventListener('click', e => { e.stopPropagation(); deleteProjectFlow(item); });
-      op.append(del);
+  closeHomeMenu();
+  const q=$('homeFilter').value.trim().toLowerCase(),sort=$('homeSort').value;
+  const rows=homeItems.filter(item=>!q||[item.name,item.replay,homeReplaySummary(item.replay).label].join(' ').toLowerCase().includes(q));
+  const byName=(a,b)=>a.name.localeCompare(b.name,'zh',{numeric:true})||a.path.localeCompare(b.path);
+  const opened=item=>Date.parse(item.last_opened)||0;
+  rows.sort((a,b)=>sort==='name-asc'?byName(a,b):sort==='name-desc'?-byName(a,b):
+    sort==='size'?((b.size_bytes??-1)-(a.size_bytes??-1)||byName(a,b)):(opened(b)-opened(a)||byName(a,b)));
+  const list=$('homeRows');list.replaceChildren();list.setAttribute('aria-busy',String(homeLoading));
+  $('homeNavCount').textContent=homeItems.length||'';
+  $('homeCount').textContent=homeLoading?'正在读取…':homeError?'读取失败':`${rows.length} 个项目`;
+  $('homeEmpty').hidden=!homeLoading&&!homeError&&rows.length>0;
+  $('homeEmpty').textContent=homeLoading?'正在读取最近项目…':homeError?`读取失败：${homeError}`:
+    q?'没有找到匹配的项目':'暂无最近项目，新建或打开一个项目开始创作。';
+  $('homeRetry').hidden=!homeError||homeLoading;
+  if(homeLoading||homeError){updateHomeControls();return;}
+  const today=new Date();today.setHours(0,0,0,0);
+  const groups=sort==='recent'&&!q?
+    [['今天',rows.filter(item=>opened(item)>=today.getTime())],['更早',rows.filter(item=>opened(item)<today.getTime())]]:
+    [[q?'搜索结果':'全部项目',rows]];
+  for(const [label,items] of groups){
+    if(!items.length)continue;
+    const section=homeNode('section','home-group');section.setAttribute('aria-label',label);
+    section.append(homeNode('h2','home-group-title',label));
+    for(const item of items){
+      const row=homeNode('article','home-project'+(item.exists?'':' missing'));row.dataset.path=item.path;
+      const button=homeNode('button','home-project-open');button.type='button';button.dataset.exists=String(item.exists);
+      button.setAttribute('aria-label',`打开项目 ${item.name}`);button.title=item.path;
+      const icon=homeNode('span','home-project-icon');icon.append(homeIcon('i-film'));
+      const copy=homeNode('span','home-project-copy'),name=homeNode('span','home-project-name',item.name);
+      name.title=item.name;
+      const replay=homeNode('span','home-project-replay'),summary=homeReplaySummary(item.replay);
+      replay.title=item.replay||'未关联回放';replay.append(homeNode('span','home-replay-label',summary.label));
+      if(summary.context)replay.append(homeNode('span','home-replay-context',summary.context));
+      copy.append(name,replay);
+      const meta=homeNode('span','home-project-meta');
+      meta.append(homeNode('span','home-project-time',item.exists?relTime(item.last_opened):'文件不存在'),homeNode('span','home-project-mode',homeMode(item)));
+      button.append(icon,copy,meta);
+      button.addEventListener('click',()=>switchHomeProject(()=>openProjectFlow(item.path)));
+      const more=homeNode('button','home-more');more.type='button';more.append(homeIcon('i-more'));
+      more.setAttribute('aria-label',`${item.name} 的更多操作`);more.setAttribute('aria-haspopup','menu');
+      more.setAttribute('aria-controls','homeProjectMenu');more.setAttribute('aria-expanded','false');
+      more.addEventListener('click',()=>showHomeMenu(item,more));
+      more.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();showHomeMenu(item,more,true);}});
+      row.append(button,more);section.append(row);
     }
-    tr.append(op);
-    if (item.exists) tr.addEventListener('click', () => guardDirty(() => openProjectFlow(item.path)));
-    tb.append(tr);
+    list.append(section);
   }
+  updateHomeControls();
+}
+function closeHomeMenu(restoreFocus=false) {
+  $('homeProjectMenu').hidden=true;
+  homeMenuTrigger?.setAttribute('aria-expanded','false');
+  if(restoreFocus&&homeMenuTrigger?.isConnected)homeMenuTrigger.focus();
+  homeMenuItem=null;homeMenuTrigger=null;
+}
+function showHomeMenu(item,trigger,keyboard=false) {
+  if(homeMenuTrigger===trigger&&!keyboard){closeHomeMenu();return;}
+  closeHomeMenu();homeMenuItem=item;homeMenuTrigger=trigger;
+  const menu=$('homeProjectMenu');menu.querySelector('.home-delete').hidden=!item.exists;
+  menu.setAttribute('aria-label',`${item.name} 的项目操作`);menu.hidden=false;
+  trigger.setAttribute('aria-expanded','true');updateHomeControls();
+  const rect=trigger.getBoundingClientRect(),gap=8;
+  menu.style.left=Math.max(gap,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-gap))+'px';
+  menu.style.top=Math.max(gap,rect.bottom+menu.offsetHeight+gap<=innerHeight?rect.bottom+4:rect.top-menu.offsetHeight-4)+'px';
+  menu.querySelector('button').focus();
+}
+function showHomeInfo(item) {
+  $('homeInfoName').textContent=item.name;
+  $('homeInfoPath').textContent=item.path;
+  $('homeInfoReplay').textContent=item.replay||'未关联回放';
+  $('homeInfoMode').textContent=homeMode(item);
+  const time=new Date(Date.parse(item.last_opened));
+  $('homeInfoTime').textContent=Number.isFinite(time.getTime())?`${time.toLocaleString('zh-CN',{hour12:false})}（${relTime(item.last_opened)}）`:'—';
+  $('homeInfoSize').textContent=item.exists?sizeText(item.size_bytes):'—';
+  $('homeInfoStatus').textContent=item.exists?'可打开':'文件不存在';
+  $('homeInfoDialog').showModal();
 }
 async function deleteProjectFlow(item) {
   if(state.busy)return;
@@ -1238,16 +1347,43 @@ $("homeNewName").addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     e.preventDefault();
     const name = $("homeNewName").value.trim(); if (!name) return;
-    guardDirty(() => action(async () => {
+    switchHomeProject(() => action(async () => {
       const result = await api("/api/projects/new", {name});
       $("homeNewRow").hidden = true; $("homeNewName").value = '';
       await refreshState(true); showHome(false); notify(`已创建项目 ${name}。`);
     }));
   }
 });
-$("homeOpen").addEventListener('click', () => guardDirty(() => openProjectFlow()));
-$("homeFilter").addEventListener('input', () => renderHome());
-$("homeSortName").addEventListener('click', () => { homeSortAsc = !homeSortAsc; renderHome(); });
+$("homeOpen").addEventListener('click', () => switchHomeProject(() => openProjectFlow()));
+$("homeFilter").addEventListener('input', paintHome);
+$("homeSort").addEventListener('change', paintHome);
+$('homeRetry').addEventListener('click',renderHome);
+$('homeProjectMenu').addEventListener('click',event=>{
+  const button=event.target.closest('[data-home-action]'),item=homeMenuItem;
+  if(!button||button.disabled||!item)return;
+  closeHomeMenu(true);
+  if(button.dataset.homeAction==='info')showHomeInfo(item);
+  if(button.dataset.homeAction==='delete')deleteProjectFlow(item);
+  if(button.dataset.homeAction==='forget')action(async()=>{
+    await api('/api/projects/forget',{path:item.path});await renderHome();
+    $('homeFilter').focus();notify(`已将 ${item.name} 移出最近列表，项目文件已保留。`);
+  });
+});
+$('homeProjectMenu').addEventListener('keydown',event=>{
+  const buttons=[...event.currentTarget.querySelectorAll('button:not([hidden]):not(:disabled)')];
+  const index=buttons.indexOf(document.activeElement);
+  if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;
+    buttons[next]?.focus();
+  }
+  if(event.key==='Tab')closeHomeMenu(true);
+});
+document.addEventListener('pointerdown',event=>{if(homeMenuItem&&!event.target.closest('#homeProjectMenu,.home-more'))closeHomeMenu();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&homeMenuItem){event.preventDefault();closeHomeMenu(true);}});
+$('homeListWrap').addEventListener('scroll',()=>closeHomeMenu());
+window.addEventListener('resize',()=>closeHomeMenu());
+window.addEventListener('blur',()=>closeHomeMenu());
 
 function settingsMessage(text,error=false){$('settingsResult').textContent=text;$('settingsResult').classList.toggle('error',error);}
 function settingsBattleStart(){return $('battleStartMode').value==='auto'?null:Number($('battleStartSeconds').value);}
@@ -1278,6 +1414,7 @@ function updateSettingsControls(){
   $('settingsBack').disabled=state.busy;
 }
 async function openSettings(){
+  closeHomeMenu();
   stopPlayback();replayPreviewPane?.stopFlight();
   state.settingsOpen=true;document.body.classList.add('settings-open');$('settingsView').hidden=false;
   $('settingsButton').setAttribute('aria-pressed','true');$('settingsBack').textContent=state.home?'返回主页':'返回工作台';

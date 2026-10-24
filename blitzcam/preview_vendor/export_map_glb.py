@@ -68,6 +68,7 @@ except ImportError:
     Image = None
 
 from wotb_sc2 import decode_dvpl, read_sc2  # noqa: E402
+from scenery_culling import ClientCullModes
 from wotb_cube import cube_to_equirect, decode_cube  # noqa: E402
 from wotb_scg import decode_polygon_normals  # noqa: E402
 from wotb_scg import (  # noqa: E402
@@ -275,7 +276,7 @@ class MaterialLibrary:
         if material_id in self._cache:
             return self._cache[material_id]
         merged: dict = {"textures": {}, "properties": {}, "flags": {}, "presets": {},
-                        "fxName": None, "materialName": None}
+                        "fxName": None, "materialName": None, "customCullMode": None}
         seen: set[int] = set()
         cur: int | None = material_id
         while isinstance(cur, int) and cur not in seen:
@@ -286,7 +287,9 @@ class MaterialLibrary:
             merged["textures"].update(node.get("textures") or {})
             merged["properties"].update(node.get("properties") or {})
             merged["flags"].update(node.get("flags") or {})
-            merged["presets"].update(node.get("enabledPresets") or {})
+            merged["presets"] = {**(node.get("enabledPresets") or {}), **merged["presets"]}
+            if merged["customCullMode"] is None and node.get("customCullMode") is not None:
+                merged["customCullMode"] = node["customCullMode"]
             if merged["fxName"] is None and node.get("fxName"):
                 merged["fxName"] = node["fxName"]
             if merged["materialName"] is None and node.get("materialName"):
@@ -1547,6 +1550,7 @@ def export_map(game_data: pathlib.Path, entry: MapEntry, output_dir: pathlib.Pat
     # （`../00_global_content/...` 去掉 ../ 后即相对此根）
     textures = TextureStore(directory, [directory.parent])
     families = ClientMaterialFamily(game_data)
+    cull_modes = ClientCullModes(game_data, decode_dvpl)
     # 地面色图槽（landscape 材质 `colorTexture`）：decal 槽与它**同一文件**（槽路径逐字
     # 相等，实测 5 图全等）时判"地表色图类"——消费端持逐图 colormap（含 alpha=光照通道），
     # **不随导**槽图；否则随导 `extras.decalTexture`（材质自有贴图）。身份用路径比较，
@@ -1944,7 +1948,8 @@ def export_map(game_data: pathlib.Path, entry: MapEntry, output_dir: pathlib.Pat
         # （audit B6 记录的植被/建筑裁切路径）；SpeedTree 卡片由其着色器自带 discard（豁免）。
         alpha_cut = alpha_test_capable(mat_desc, fam)
         alpha_blend_preset = bool((mat_desc.get("presets") or {}).get("AlphaBlend"))
-        mat_key = (albedo_path, decal_path, mask_path, flat_rgb, has_alpha,
+        cull_mode = cull_modes.resolve(mat_desc)
+        mat_key = (albedo_path, decal_path, mask_path, flat_rgb, has_alpha, cull_mode,
                    bool(img is not None), anim_layer and mask_path is not None,
                    is_water, st_tint, card_occ, tocc_applied,
                    # alpha 裁切判据进键：同 albedo 的实例可一个声明 AlphaTest、一个不声明
@@ -1995,7 +2000,7 @@ def export_map(game_data: pathlib.Path, entry: MapEntry, output_dir: pathlib.Pat
                 detail_img=detail_img, detail_scale=detail_scale,
                 env=env_desc, water=is_water, water_surface=water_surface,
                 blend_by_angle=blend_by_angle, decal=is_decal,
-                ground_cm_slot=ground_cm_slot)
+                ground_cm_slot=ground_cm_slot, cull_mode=cull_mode)
         material_index = material_index_by_albedo[mat_key]
 
         # 网格按 (datasource, 材质) 去重：同型物体共享几何，但不同材质的
@@ -2342,7 +2347,7 @@ def _build_material(glb: GlbBuilder, textures: TextureStore, albedo_path: str | 
                     water_surface: dict | None = None,
                     blend_by_angle: dict | None = None,
                     decal: bool = False,
-                    ground_cm_slot: str | None = None) -> int:
+                    ground_cm_slot: str | None = None, cull_mode: int | None = None) -> int:
     """albedo 贴图（含透明）→ GLB 材质；无贴图时用贴图均值色兜底。
 
     blend=True（TEXTURE0_ANIMATION_SHIFT 效果层：瀑布/波纹/烟雾）：客户端在
@@ -2366,10 +2371,14 @@ def _build_material(glb: GlbBuilder, textures: TextureStore, albedo_path: str | 
     base_name = (mat_desc.get("materialName") or "mat")[:60]
     base = {"name": ("ST|" + base_name) if st_tint is not None else base_name,
             "pbrMetallicRoughness": {"metallicFactor": 0.0, "roughnessFactor": 1.0},
-            "doubleSided": True}
+            "doubleSided": cull_mode in (None, 0)}
     if st_tint is not None:
         base["pbrMetallicRoughness"]["baseColorFactor"] = [st_tint[0], st_tint[1], st_tint[2], 1.0]
     extras = {}
+    if cull_mode is not None:
+        # glTF cannot encode front-face culling; retain the exact client mode
+        # for the runtime's custom shaders as well as its ordinary materials.
+        extras["clientCullMode"] = cull_mode
     if decal:
         # 贴花（客户端 decal 路径，判据见 decal_capable）：消费端按
         # `albedo(UV0) × decal槽(UV1).rgb（LSC 图再 × 槽图.a）× 2.0` 渲染，**不受光**。

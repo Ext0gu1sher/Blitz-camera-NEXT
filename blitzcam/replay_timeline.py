@@ -13,6 +13,11 @@ def validate_timeline(value):
     if not isinstance(value, dict) or value.get('time_basis') != 'replay':
         raise ValueError('时间轴需使用对局绝对时间。')
     result = {'time_basis':'replay'}
+    if 'starter_keyframes_pending' in value:
+        if type(value['starter_keyframes_pending']) is not bool:
+            raise ValueError('默认关键帧初始化标记无效。')
+        if value['starter_keyframes_pending']:
+            result['starter_keyframes_pending'] = True
     for name in ('duration_sec','work_start_sec','work_end_sec'):
         x = value.get(name)
         if isinstance(x,bool) or not isinstance(x,(int,float)) or not math.isfinite(x) or not 0 <= x <= 3600:

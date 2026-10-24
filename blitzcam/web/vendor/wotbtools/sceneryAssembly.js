@@ -19,6 +19,19 @@ import {
   materialIsWater, isWaterNode, isSkyShell, sceneHasSkyFlags,
 } from './sceneryAssemblyRules.js';
 
+// Custom shaders must retain the client's forward-pass face culling. Upstream
+// used DoubleSide everywhere, which draws the back of walls in close shots.
+// Unknown/older assets retain their existing behavior; rebuilt GLBs carry the
+// resolved material/preset/instance mode, including two-sided foliage and sky.
+export function preserveSceneryCulling(source, rendered) {
+  const mode = source.userData?.clientCullMode;
+  if (mode === 0 || mode === 1 || mode === 2) {
+    rendered.side = [THREE.DoubleSide, THREE.BackSide, THREE.FrontSide][mode];
+    rendered.userData.clientCullMode = mode;
+  }
+  return rendered;
+}
+
 /** extras 贴图预解析（material.extras 里存 glTF **texture 下标**；GLTFLoader 的 texture
  *  依赖是异步的、材质转换遍历是同步的 ⇒ 先解析成 Map，遍历时同步取用）。
  *  解析不到（旧包/无 extras）⇒ 各分支自然回落（行为与无 extras 时期一致）。 */
@@ -151,7 +164,7 @@ export function assembleSceneryMaterials(gltf, {
     [isCard ? 'C' : 'M', m.name || '', m.map ? m.map.uuid : '',
      m.color ? [m.color.r, m.color.g, m.color.b].map((v) => v.toFixed(4)).join(',') : '',
      m.alphaMode || '', m.alphaTest ?? 0, !!m.transparent, m.opacity ?? 1,
-     !!m.vertexColors,
+     !!m.vertexColors, m.userData?.clientCullMode ?? '',
      (m.userData && m.userData.occMean) || '',
      (m.userData && m.userData.blendLayer) || '',
      (m.userData && m.userData.alphaBlend) || '',
@@ -222,8 +235,8 @@ export function assembleSceneryMaterials(gltf, {
     // ⚠️ frustumCulled 必须关：天穹顶点在网格局部空间里只是 ~10m 的小球，
     // 按真实包围球剔锥时镜头一转向天就整片消失——客户端由 w=0 的无限远投影天然免疫。
     if (!waterMarked && isSkyNode(o)) {
-      o.material = Array.isArray(o.material) ? o.material.map((m) => makeSkyMaterial(m))
-                                             : makeSkyMaterial(o.material);
+      const skyMat = m => preserveSceneryCulling(m, makeSkyMaterial(m));
+      o.material = Array.isArray(o.material) ? o.material.map(skyMat) : skyMat(o.material);
       // 语义标记：合批过滤必须按它排除天穹（新包天穹名可能不含 sky；材质转换后
       // extras 判据不可再取）。名字 fallback 已由 isSkyNode 统一处理。
       o.userData.isSky = true;
@@ -298,7 +311,8 @@ export function assembleSceneryMaterials(gltf, {
       if (uw) {
         return cachedSceneryMat(['U', m.name || '', m.map ? m.map.uuid : '',
                                  m.color ? [m.color.r, m.color.g, m.color.b].map((v) => v.toFixed(4)).join(',') : '',
-                                 !!m.transparent, m.opacity ?? 1, m.alphaTest ?? 0].join('|'),
+                                 !!m.transparent, m.opacity ?? 1, m.alphaTest ?? 0,
+                                 m.userData?.clientCullMode ?? ''].join('|'),
           () => {
             if (m.map) { m.map.colorSpace = THREE.NoColorSpace; m.map.needsUpdate = true; }
             const nm = new THREE.MeshBasicMaterial({
@@ -314,7 +328,8 @@ export function assembleSceneryMaterials(gltf, {
       }
       return convMat(m, isCard);
     };
-    o.material = Array.isArray(o.material) ? o.material.map(assignMat) : assignMat(o.material);
+    const convert = m => preserveSceneryCulling(m, assignMat(m));
+    o.material = Array.isArray(o.material) ? o.material.map(convert) : convert(o.material);
     // 水体（海平面等半透明大面）：透明 + depthWrite=true + DoubleSide 会与地形/自身共面
     // 产生 z-fighting 与透明互遮挡闪烁；其几何极简且为全场唯一透明物 ⇒ 正常写深度最稳。
     // 不设 renderOrder：交给 THREE 在透明队列内按摄像机距离排序。
@@ -323,7 +338,7 @@ export function assembleSceneryMaterials(gltf, {
       for (const mm of ms) {
         if (!mm || !mm.transparent) continue;
         mm.depthWrite = true;
-        mm.side = THREE.DoubleSide;
+        if (mm.userData.clientCullMode === undefined) mm.side = THREE.DoubleSide;
         mm.depthTest = true;
         mm.needsUpdate = true;
       }

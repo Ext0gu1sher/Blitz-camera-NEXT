@@ -197,6 +197,23 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
             with self.assertRaises(CameraError):self.app.open_replay()
         self.mocks[0].assert_not_called()
 
+    def test_pending_file_choice_cannot_bind_a_new_project(self):
+        selected, release = threading.Event(), threading.Event()
+        def choose():
+            selected.set(); release.wait(3); return self.replay
+        self.mocks[2].side_effect = choose
+        self.app.open_replay(); self.assertTrue(selected.wait(2))
+        try:
+            self.app.new_project_file('new while choosing')
+            before = self.app.project.to_dict()
+        finally:
+            release.set()
+        state = await_state(self.app, {'error'})
+        self.assertIn('项目已改变', state['replay_launch']['message'])
+        self.assertEqual(self.app.project.to_dict(), before)
+        self.assertNotIn('replay_file', self.app.project.replay_timeline)
+        self.mocks[3].assert_not_called()
+
     def test_launch_failure_preserves_project(self):
         before = self.app.project.to_dict(); self.mocks[3].side_effect = OSError('fixture launch failed')
         self.app.open_replay(str(self.replay))

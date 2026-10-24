@@ -5,6 +5,7 @@ are isolated asset-conversion dependencies, included in the desktop package.
 """
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import struct
@@ -60,6 +61,21 @@ def vec(raw):
     return [v[0], v[2], v[1]]  # same correctZY as tank_configs.rs
 
 
+def pitch_range(raw):
+    """GunModelDefinition.pitch -> Agent GunPitchRange (degrees, including sectors)."""
+    if raw is None: return None
+    number = lambda data, f: struct.unpack('<f', one(data, f, 5, b'\0'*4))[0]
+    result = {'dep':number(raw, 2), 'ele':-number(raw, 1)}
+    for field, name in ((3, 'front'), (4, 'back')):
+        sector = one(raw, field, 2)
+        if sector is not None:
+            result[name] = {key:number(sector, i) for i,key in enumerate(('min','max','range'),1)}
+    if one(raw, 5, 5) is not None: result['transition'] = number(raw, 5)
+    values = [v for value in result.values() for v in (value.values() if isinstance(value,dict) else [value])]
+    if not all(math.isfinite(v) for v in values): return None
+    return result
+
+
 def model_metadata(tank_id):
     content = None
     for f, w, b in fields((VENDOR/'data/models.pb').read_bytes()):
@@ -91,8 +107,42 @@ def model_metadata(tank_id):
             gun_module, gun = one(gb, 1, 0), one(gb, 2, 2, b'')
             configs.append({'turret_local':turret_module >> 8, 'gun_local':gun_module >> 8,
                             'turret_node':one(data, 3, 0, 0), 'gun_node':one(gun, 3, 0, 0),
-                            'gun_origin':vec(one(data, 4, 2, b''))})
+                            'gun_origin':vec(one(data, 4, 2, b'')),
+                            'pitch_limits':pitch_range(one(gun, 4, 2))})
     return {'model_origins':{'track':track,'turret':turret_origin}, 'initial_turret_rotation':itr, 'configs':configs}
+
+
+def playback_pitch_limits(vehicles):
+    """Resolve replay-mounted modules before the second WASM playback parse.
+
+    Read pinned metadata directly, so existing GLB caches need no regeneration.
+    Ambiguous/missing modules stay explicitly unanchored instead of using another
+    gun's range. This is the same selection policy as the preview model rig.
+    """
+    if not isinstance(vehicles, list) or len(vehicles) > 64:
+        raise ValueError('预览车辆名单无效。')
+    limits, anchored, missing, metadata = {}, [], [], {}
+    for vehicle in vehicles:
+        if (not isinstance(vehicle, dict) or
+                any(type(vehicle.get(key)) is not int or vehicle[key] < 0
+                    for key in ('eid','tank_id')) or
+                any(vehicle.get(key) is not None and (type(vehicle[key]) is not int or vehicle[key] < 0)
+                    for key in ('turret_local','gun_local')) or
+                not isinstance(vehicle.get('nickname'), str) or len(vehicle['nickname']) > 256):
+            raise ValueError('预览车辆配置无效。')
+        tid = vehicle['tank_id']
+        if tid not in metadata: metadata[tid] = model_metadata(tid)
+        configs = (metadata[tid] or {}).get('configs', [])
+        matches = [c for c in configs if (c['turret_local'], c['gun_local']) ==
+                   (vehicle.get('turret_local'), vehicle.get('gun_local'))]
+        cfg = matches[-1] if matches else (configs[0] if len(configs) == 1 else None)
+        limit = cfg.get('pitch_limits') if cfg else None
+        if limit is not None and vehicle['nickname']:
+            limits[vehicle['nickname']] = limit
+            anchored.append(vehicle['eid'])
+        else:
+            missing.append(vehicle['eid'])
+    return {'limits':limits, 'anchored':anchored, 'missing':missing}
 
 
 class AssetBuilder:

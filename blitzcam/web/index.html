@@ -95,6 +95,9 @@
     <symbol id="i-target" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-home" viewBox="0 0 16 16"><path d="M2 8 8 2.5 14 8M4 7.5V13h8V7.5"/></symbol>
     <symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 1.5h5.5L13 5v9.5H4zM9.5 1.5V5H13"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 16 16"><path d="M4 2v12m-2.5-2.5L4 14l2.5-2.5M8 3h6M8 6h4M8 9h2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-settings" viewBox="0 0 16 16"><path d="m6.4 1.8-.3 1.7-1.2.7-1.6-.5-1.6 2.7 1.3 1.1v1.4L1.7 10l1.6 2.7 1.6-.5 1.2.7.3 1.7h3.2l.3-1.7 1.2-.7 1.6.5 1.6-2.7L13 8.9V7.5l1.3-1.1-1.6-2.7-1.6.5-1.2-.7-.3-1.7Z"/><circle cx="8" cy="8.2" r="2.1"/></symbol>
   </svg>
 
@@ -117,7 +120,7 @@
       <button class="ib" id="openOverlay" title="悬浮小窗" aria-label="悬浮小窗"><svg class="ic"><use href="#i-pip"/></svg></button>
       <button class="ib" id="settingsButton" title="设置" aria-label="设置" aria-pressed="false"><svg class="ic"><use href="#i-settings"/></svg></button>
     </div>
-    <span class="version-label">0.9.4 · STEAM 11.21</span>
+    <span class="version-label">0.9.4.1 · STEAM 11.21</span>
     <div class="window-controls" id="windowControls" hidden>
       <button class="wc" id="winMin" title="最小化" aria-label="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
       <button class="wc" id="winMax" title="最大化" aria-label="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
@@ -125,25 +128,38 @@
     </div>
   </header>
 
-  <main class="home" id="homeView" hidden>
-    <aside class="home-side">
-      <button class="home-new" id="homeNew"><svg class="ic"><use href="#i-doc"/></svg><span data-label>新建项目</span></button>
+  <main class="home" id="homeView" aria-labelledby="homeTitle" hidden>
+    <aside class="home-side" aria-label="项目导航">
+      <button class="home-new" id="homeNew"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span data-label>新建项目</span></button>
       <div class="home-new-row" id="homeNewRow" hidden><input id="homeNewName" placeholder="项目名称" aria-label="项目名称"></div>
-      <button class="home-link" id="homeOpen"><svg class="ic"><use href="#i-folder"/></svg><span data-label>打开项目</span></button>
-      <nav class="home-nav"><a class="home-nav-item active" id="homeNavHome"><svg class="ic"><use href="#i-home"/></svg>主页</a></nav>
+      <button class="home-link" id="homeOpen"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span data-label>打开项目</span></button>
+      <nav class="home-nav" aria-label="工作空间"><span class="home-nav-label">工作空间</span><button class="home-nav-item active" id="homeNavHome" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg>最近项目<span id="homeNavCount" class="home-nav-count"></span></button></nav>
     </aside>
     <section class="home-main">
-      <h1 class="home-title">欢迎使用 Blitz Camera NEXT</h1>
-      <div class="home-recent-head"><span>最近使用项</span><input id="homeFilter" placeholder="筛选" aria-label="筛选最近项目"></div>
-      <div class="home-table-wrap">
-        <table class="home-table">
-          <thead><tr><th class="sortable" id="homeSortName">名称 <span id="homeSortDir"></span></th><th>最近使用</th><th>回放</th><th>模式</th><th class="num">大小</th><th class="op"></th></tr></thead>
-          <tbody id="homeRows"></tbody>
-        </table>
-        <div class="home-empty" id="homeEmpty" hidden>暂无最近项目</div>
+      <div class="home-heading"><h1 class="home-title" id="homeTitle">最近项目</h1><span id="homeCount" class="home-count" role="status" aria-live="polite"></span></div>
+      <div class="home-toolbar">
+        <label class="home-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="homeFilter" type="search" placeholder="搜索项目或回放…" aria-label="搜索项目或回放" autocomplete="off"></label>
+        <label class="home-sort"><svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg><select id="homeSort" aria-label="项目排序"><option value="recent">最近使用</option><option value="name-asc">名称 A → Z</option><option value="name-desc">名称 Z → A</option><option value="size">文件大小</option></select></label>
+      </div>
+      <div class="home-list-wrap" id="homeListWrap">
+        <div id="homeRows" aria-label="最近项目列表"></div>
+        <div class="home-empty" id="homeEmpty" role="status" hidden>暂无最近项目</div>
+        <button class="button secondary home-retry" id="homeRetry" hidden>重新加载</button>
       </div>
     </section>
   </main>
+  <div class="home-project-menu" id="homeProjectMenu" role="menu" aria-label="项目操作" hidden>
+    <button type="button" role="menuitem" data-home-action="info">项目信息</button>
+    <button type="button" role="menuitem" class="home-remove" data-home-action="forget">移出最近列表</button>
+    <button type="button" role="menuitem" class="home-delete" data-home-action="delete">删除项目…</button>
+  </div>
+  <dialog class="modal home-info-dialog" id="homeInfoDialog" aria-labelledby="homeInfoName">
+    <form method="dialog">
+      <h2 id="homeInfoName"></h2>
+      <dl><dt>项目路径</dt><dd id="homeInfoPath"></dd><dt>关联回放</dt><dd id="homeInfoReplay"></dd><dt>模式</dt><dd id="homeInfoMode"></dd><dt>最近使用</dt><dd id="homeInfoTime"></dd><dt>文件大小</dt><dd id="homeInfoSize"></dd><dt>文件状态</dt><dd id="homeInfoStatus"></dd></dl>
+      <div class="modal-btns"><button class="button secondary" autofocus>关闭</button></div>
+    </form>
+  </dialog>
 
   <main class="settings-page" id="settingsView" hidden aria-labelledby="settingsTitle">
     <aside class="settings-side">

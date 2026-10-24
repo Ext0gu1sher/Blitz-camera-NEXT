@@ -222,8 +222,9 @@ class Workstation:
                 raise CameraError('回放选择或启动尚未完成。')
             launch_id = uuid4().hex
             project_directory = self.project_path.parent
+            project_path = self.project_path
             project_revision = self.project_revision
-            self.replay_launch = {'id': launch_id, 'state': 'choosing', 'verified': False,
+            self.replay_launch = {'id': launch_id, 'state': 'choosing', 'verified': False, 'project_path': str(project_path),
                                   'message': '请选择本地回放文件…' if path is None else '正在检查回放文件…'}
         def worker():
             try:
@@ -257,7 +258,7 @@ class Workstation:
                         return
                     if self.playback.state()['active']:
                         raise CameraError('镜头接管仍在运行，请先停止。')
-                    if expected_replay is not None and project_revision != self.project_revision:
+                    if self.project_path != project_path or (expected_replay is not None and project_revision != self.project_revision):
                         raise CameraError('项目已改变，请重新打开当前项目的回放。')
                     self.replay_launch.update(state='launching', info=info, message='正在启动游戏并打开所选回放…')
                     self.disconnect()
@@ -277,7 +278,7 @@ class Workstation:
         return True
 
     def _bind_opened_replay(self, info):
-        """Bind source/length only; preserve every authored camera timestamp."""
+        """Bind a replay, placing untouched starter keys after its pre-battle zone."""
         data = deepcopy(self.project.to_dict())
         duration = info['duration_sec']
         timeline = deepcopy(self.project.replay_timeline) or {
@@ -295,6 +296,20 @@ class Workstation:
             timeline.update(work_start_sec=0, work_end_sec=min(8, duration))
         from .replay_timeline import replay_keyframe_guard
         guard = replay_keyframe_guard(timeline, read_settings(OUTPUT), info)
+        if (self.project.shooting_mode != 'camera_only' and timeline.get('starter_keyframes_pending')
+                and guard['start_sec'] is not None and guard['start_sec'] < duration):
+            start = guard['start_sec']
+            first, last = self.project.start_time, self.project.end_time
+            scale = min(1., (duration-start)/(last-first)) if last > first else 1.
+            def aligned(when):
+                return min(duration, start+(when-first)*scale)
+            for row in [data['keyframes'], *data.get('camera_tracks', {}).values()]:
+                for key in row:
+                    key['time_sec'] = aligned(key['time_sec'])
+            if data['replay_speed'].get('time_range'):
+                data['replay_speed']['time_range'] = {'start_sec': start, 'end_sec': aligned(last)}
+            timeline.update(work_start_sec=start, work_end_sec=aligned(last))
+            timeline.pop('starter_keyframes_pending', None)
         if guard['enabled'] and guard['start_sec'] is not None and timeline['work_start_sec'] < guard['start_sec'] < duration:
             if self.project.replay_speed['mode'] == 'curve' and not data['replay_speed'].get('time_range') and self.project.replay_timeline:
                 data['replay_speed']['time_range'] = {'start_sec': self.project.replay_timeline['work_start_sec'], 'end_sec': self.project.replay_timeline['work_end_sec']}
@@ -367,6 +382,9 @@ class Workstation:
             if self.playback.state()['active']:
                 raise CameraError('运镜期间请先停止，再编辑或记录属性关键帧。')
             self.validate_keyframe_edit(project)
+            if (project.replay_timeline and project.replay_timeline.get('starter_keyframes_pending')
+                    and (project.shooting_mode == 'camera_only' or track_controls(project) != track_controls(self.project))):
+                project.replay_timeline.pop('starter_keyframes_pending', None)
             self._remember_replay_identity(project)
             atomic_json(self.project_path, project.to_dict())
             self.project = project
@@ -478,6 +496,8 @@ class Workstation:
             raise ValueError('同名项目已存在，请换一个名称。')
         data = read_project(ROOT/"examples/eight-second.json").to_dict()
         data['shooting_mode'] = 'replay'
+        data['replay_timeline'] = {'time_basis': 'replay', 'duration_sec': 8.,
+                                 'work_start_sec': 0., 'work_end_sec': 8., 'starter_keyframes_pending': True}
         project = validate_project(data)
         with self.lock:
             if self.playback.state()['active']:
@@ -873,6 +893,9 @@ def make_handler(workstation):
                     self._send(200, workstation.replay_preview.select(selected)); return
                 elif path == '/api/preview/prepare':
                     workstation.replay_preview.prepare(data.get('source_id'), data.get('map_id'), data.get('tank_ids'))
+                elif path == '/api/preview/pitch-limits':
+                    from .preview_assets import playback_pitch_limits
+                    self._send(200, playback_pitch_limits(data.get('vehicles'))); return
                 elif path == "/api/disconnect": workstation.disconnect()
                 elif path == "/api/capture": workstation.capture(data["time_sec"], data.get("replace_existing", False), data.get("name", ""), data.get("expected_revision"))
                 elif path == '/api/capture/hotkey':

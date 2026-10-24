@@ -4,6 +4,7 @@
   const CHANNELS=[['x','X','#d99589'],['y','Y','#98c889'],['z','Z','#80b6e3'],['yaw','摄像机水平角度','#b5a0e1'],['pitch','俯仰','#b5a0e1'],['roll','横滚','#b5a0e1'],['zoom','缩放','#e0b96e']];
   const clone=x=>JSON.parse(JSON.stringify(x)),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const clean=rows=>rows.map(({_id,...r})=>r);
+  const rateMean=(speed,i)=>{const a=speed.keyframes[i],b=speed.keyframes[i+1];return a.rate+(b.rate-a.rate)*(a.ease?Timing.bezierArea(a.ease,1):.5);};
   const pretty=t=>Number.isFinite(t)?t.toFixed(3):'—';
   const clipboardType='application/x-blitzcam-keyframes',clipboardPrefix='BlitzCamera keyframes\n';
   class ClockMap{
@@ -42,7 +43,7 @@
       root.addEventListener('pointerdown',e=>this.down(e));root.addEventListener('pointermove',e=>this.move(e));root.addEventListener('pointerup',e=>this.up(e));root.addEventListener('pointercancel',()=>this.cancel());
       root.addEventListener('lostpointercapture',e=>{if(this.drag?.kind==='work')this.cancel();else if(this.drag?.pointerId===e.pointerId)this.up(e);});
       root.ownerDocument.addEventListener('pointerup',e=>{if(this.drag?.pointerId===e.pointerId)this.up(e);},true);
-      root.ownerDocument.defaultView.addEventListener('blur',()=>{if(this.drag?.kind==='work')this.cancel();});
+      root.ownerDocument.defaultView.addEventListener('blur',()=>{if(['work','seek'].includes(this.drag?.kind))this.cancel();});
       // A pointer transaction owns the range until release or cancellation;
       // do not let editor/global playback shortcuts commit its temporary data.
       root.ownerDocument.addEventListener('keydown',e=>{
@@ -87,11 +88,32 @@
     autoPan(e){
       this.lastPointer={clientX:e.clientX,clientY:e.clientY,altKey:e.altKey,auto:true};
       if(this.autoFrame)return;
-      const frame=()=>{this.autoFrame=0;if(!this.drag||!['key','work'].includes(this.drag.kind))return;
-        const r=this.scroll.getBoundingClientRect(),p=this.lastPointer,edge=p.clientX>r.right-30?1:p.clientX<r.left+30?-1:0;
-        if(!edge)return;this.grow((this.scroll.scrollLeft+this.scroll.clientWidth+64)/this.scale);this.render();
-        const before=this.scroll.scrollLeft;this.scroll.scrollLeft=Math.max(0,before+edge*12);
-        if(this.scroll.scrollLeft!==before){this.move(p);this.autoFrame=requestAnimationFrame(frame);}
+      const frame=now=>{this.autoFrame=0;const d=this.drag;if(!d||!['key','work','seek'].includes(d.kind))return;
+        const smooth=d.kind==='seek',band=smooth?40:30,r=this.scroll.getBoundingClientRect(),p=this.lastPointer;
+        const edge=p.clientX>r.right-band?1:p.clientX<r.left+band?-1:0;
+        if(!edge){d.panEdge=0;d.panVelocity=0;d.panFraction=0;return;}
+        let step=12;
+        if(smooth){
+          if(d.panEdge!==edge){d.panEdge=edge;d.panAt=now;d.panVelocity=0;d.panFraction=0;}
+          const dt=clamp((now-d.panAt)/1000,0,.05);d.panAt=now;
+          const depth=clamp((edge>0?p.clientX-r.right+band:r.left+band-p.clientX)/band,0,1);
+          // Ease into a gentle pixels-per-second speed, increasing toward the
+          // edge. Cap frame time so a busy preview cannot cause a large jump.
+          const target=180*depth*depth;
+          d.panVelocity+=(target-d.panVelocity)*(1-Math.exp(-dt/.22));
+          step=d.panVelocity*dt;
+        }
+        const horizon=this.horizon;
+        if(edge>0)this.grow((this.scroll.scrollLeft+this.scroll.clientWidth+step)/this.scale);
+        if(!smooth||this.horizon!==horizon)this.render();
+        const before=this.scroll.scrollLeft,max=this.scroll.scrollWidth-this.scroll.clientWidth;
+        // Keep subpixel movement until the browser can scroll a physical pixel.
+        // A very slow start must not stall because scrollLeft rounds each frame.
+        const delta=edge*step+(smooth?d.panFraction:0);
+        this.scroll.scrollLeft=clamp(before+delta,0,max);
+        const moved=this.scroll.scrollLeft-before;if(smooth)d.panFraction=delta-moved;
+        if(moved)this.move(p);
+        if(smooth?(edge>0?this.scroll.scrollLeft<max:this.scroll.scrollLeft>0):moved)this.autoFrame=requestAnimationFrame(frame);
       };this.autoFrame=requestAnimationFrame(frame);
     }
 
@@ -289,8 +311,12 @@
       const item=this.singleSelection();if(!item)return false;
       return this.edit(()=>{
         if(item.row.name==='rate'){
-          if(field==='time')item.key.progress=this.map().rateProgress(value);else item.key.rate=value;
-          Timing.boundHandles(this.doc.speed);
+          const map=this.map(),keys=this.doc.speed.keyframes,times=keys.map(k=>map.rateTime(k.progress)),i=keys.indexOf(item.key);
+          if(field==='time'){
+            if(i===0||i===keys.length-1||value<=times[i-1]||value>=times[i+1])throw new Error('速率关键帧需位于相邻点之间，首尾时间固定。');
+            times[i]=value;
+          }else item.key.rate=value;
+          this.boundRateHandles();this.setRateTimes(times);
         }else item.key[field==='time'?'time_sec':'value']=value;
       });
     }
@@ -299,7 +325,13 @@
       const before=this.numberEdit;if(!before)return;this.numberEdit=null;
       if(cancelled){this.doc=before;this.render();this.adapter.change(this.data());}else try{this.validate(before);this.commit(before);}catch(error){this.doc=before;this.render();this.adapter.change(this.data());this.adapter.error(error.message);}
     }
-    commit(before){if(JSON.stringify(before)===JSON.stringify(this.doc)){this.render();return;}if(!this.numberEdit){this.undoStack.push(before);if(this.undoStack.length>100)this.undoStack.shift();this.redoStack=[];}this.render();this.adapter.change(this.data());}
+    commit(before){
+      if(JSON.stringify(before)===JSON.stringify(this.doc)){this.render();return;}
+      // Once the user authors camera keys, binding a replay must preserve them.
+      if(this.doc.timeline?.starter_keyframes_pending&&(this.free()||JSON.stringify(before.tracks)!==JSON.stringify(this.doc.tracks)))delete this.doc.timeline.starter_keyframes_pending;
+      if(!this.numberEdit){this.undoStack.push(before);if(this.undoStack.length>100)this.undoStack.shift();this.redoStack=[];}
+      this.render();this.adapter.change(this.data());
+    }
     changeSpeed(speed){if(!this.doc)return;this.edit(()=>{const previous=this.doc.speed;this.doc.speed=clone(speed);this.anchorSpeed();this.doc.speed.keyframes.forEach((k,i)=>k._id=previous.keyframes[i]?._id||++this.ids);});}
     validate(before=null){
       if(!Timing.valid(this.doc.speed))throw new Error('速度曲线时间范围或倍率无效。');
@@ -432,10 +464,10 @@
         const id=Number(key.dataset.key),item=this.locate(id);if(e.shiftKey){if(this.selected.has(id))this.selected.delete(id);else this.selected.add(id);}else if(!this.selected.has(id))this.selected=new Set([id]);
         // Keep camera and rate drags separate: their clocks have different units.
         for(const selected of this.selected)if((this.locate(selected)?.row.name==='rate')!==(item.row.name==='rate'))this.selected.delete(selected);
-        if(!this.locked)this.drag={kind:'key',x:p.x,y:p.y,map,before:this.snapshot(),ids:new Set(this.selected),anchor:id,rate:item.row.name==='rate',pointerId:e.pointerId,moved:false};
+        if(!this.locked&&this.selected.has(id))this.drag={kind:'key',x:p.x,y:p.y,map,before:this.snapshot(),ids:new Set(this.selected),anchor:id,rate:item.row.name==='rate',pointerId:e.pointerId,moved:false};
         this.render();return;
       }
-      if(p.y<40||e.target.closest('.seq-head')){this.drag={kind:'seek',map};this.scrub(p.x,map,e);return;}
+      if(p.y<40||e.target.closest('.seq-head')){this.drag={kind:'seek',map,pointerId:e.pointerId};this.scrub(p.x,map,e);return;}
       if(this.locked)return;
       this.drag={kind:'box',x:p.x,y:clamp(p.y,40,this.height()),prior:e.shiftKey?new Set(this.selected):new Set()};if(!e.shiftKey)this.selected.clear();this.render();
     }
@@ -444,29 +476,61 @@
       if(this.snap&&!e?.altKey){const hit=this.snapTo(d,this.snapTargets(null,map,false));d=hit?hit.time:Math.round(d*this.fps)/this.fps;}
       this.adapter.seek(this.fromDisplay(clamp(d,0,this.total(map)),map));
     }
-    moveRate(d,delta,rateDelta){
-      const keys=this.doc.speed.keyframes,originals=d.before.speed.keyframes;
-      for(let i=0;i<keys.length;i++)if(d.ids.has(keys[i]._id))keys[i].rate=clamp(originals[i].rate+rateDelta,.0625,1);
-      Timing.boundHandles(this.doc.speed);
-      const anchor=keys.find(k=>k._id===d.anchor),original=originals.find(k=>k._id===d.anchor);
-      if(original.progress===0||original.progress===1)return;
-      // Move the selected group without crossing its fixed neighbours or endpoints.
-      const moving=keys.map((k,i)=>d.ids.has(k._id)&&i>0&&i<keys.length-1),indices=keys.map((_,i)=>i).filter(i=>moving[i]);
-      let lo=-1,hi=1;
-      for(const i of indices){
-        let prev=i-1,next=i+1;while(moving[prev])prev--;while(moving[next])next++;
-        lo=Math.max(lo,originals[prev].progress+1.01e-5-originals[i].progress);
-        hi=Math.min(hi,originals[next].progress-1.01e-5-originals[i].progress);
+    boundRateHandles(){
+      const keys=this.doc.speed.keyframes;
+      // Leave legal handles (including handles on flat segments) byte-for-byte
+      // intact. Only clamp a segment whose changed rates put it out of bounds.
+      for(let i=1;i<keys.length;i++){const a=keys[i-1],b=keys[i];
+        if(a.ease&&[1,3].some(j=>{const r=a.rate+(b.rate-a.rate)*a.ease[j];return r<.0625||r>1;}))Timing.boundHandles({keyframes:[a,b]});
       }
-      lo=Math.min(lo,0);hi=Math.max(hi,0);
-      const display=offset=>{for(const i of indices)keys[i].progress=originals[i].progress+offset;return this.rateDisplay(anchor.progress,this.map());};
-      const target=this.rateDisplay(original.progress,d.map)+delta;
-      // A rate edit changes the integral and therefore the key's displayed time.
-      // Invert the edited curve, so both rulers follow the pointer even on release.
-      if(target<=display(lo))return;
-      if(target>=display(hi))return;
-      for(let i=0;i<32;i++){const mid=(lo+hi)/2;if(display(mid)<target)lo=mid;else hi=mid;}
-      display((lo+hi)/2);
+    }
+    setRateTimes(times){
+      const s=this.doc.speed,segments=times.slice(1).map((time,i)=>(time-times[i])/rateMean(s,i)),total=segments.reduce((sum,v)=>sum+v,0);
+      let elapsed=0;
+      // Progress is stored in shooting time. Rebuild every segment from its
+      // replay duration, so changing one point cannot retime its neighbours.
+      for(let i=0;i<s.keyframes.length;i++){if(i)elapsed+=segments[i-1];s.keyframes[i].progress=i===s.keyframes.length-1?1:elapsed/total;}
+      return segments;
+    }
+    moveRate(d,delta,rateDelta){
+      const s=this.doc.speed,keys=s.keyframes,originals=d.before.speed.keyframes;
+      const times=originals.map(k=>d.map.rateTime(k.progress)),anchor=keys.findIndex(k=>k._id===d.anchor);
+      const applyRates=fraction=>{
+        for(let i=0;i<keys.length;i++){
+          keys[i].rate=d.ids.has(keys[i]._id)?clamp(originals[i].rate+rateDelta*fraction,.0625,1):originals[i].rate;
+          if(originals[i].ease)keys[i].ease=originals[i].ease.slice();
+        }
+        this.boundRateHandles();this.setRateTimes(times);return Timing.valid(s);
+      };
+      // At the minimum spacing, changing a rate can also exhaust the stored
+      // progress precision. Stop at that limit instead of jumping on release.
+      if(!applyRates(1)){
+        if(!applyRates(0)){this.doc.speed=clone(d.before.speed);return;}
+        let lo=0,hi=1;for(let i=0;i<40;i++){const mid=(lo+hi)/2;if(applyRates(mid))lo=mid;else hi=mid;}applyRates(lo);
+      }
+      if(anchor<=0||anchor===keys.length-1)return;
+      const moving=keys.map((k,i)=>i>0&&i<keys.length-1&&d.ids.has(k._id)?1:0);
+      const segments=this.setRateTimes(times),slopes=segments.map((_,i)=>(moving[i+1]-moving[i])/rateMean(s,i));
+      const total=segments.reduce((sum,v)=>sum+v,0),slope=slopes.reduce((sum,v)=>sum+v,0);
+      let lo=-Infinity,hi=Infinity;
+      // Both segment duration and total shooting duration vary linearly with
+      // a replay-time offset. Enforce the actual normalized storage gap, rather
+      // than a fixed progress offset that moves other points on the ruler.
+      for(let i=0;i<segments.length;i++){
+        const gap=Math.min(1.01e-5,segments[i]/total),coefficient=slopes[i]-gap*slope,bound=gap*total-segments[i];
+        if(coefficient>0)lo=Math.max(lo,bound/coefficient);else if(coefficient<0)hi=Math.min(hi,bound/coefficient);
+      }
+      const apply=offset=>this.setRateTimes(times.map((time,i)=>time+moving[i]*offset));
+      if(this.axis==='replay'){apply(clamp(delta,lo,hi));return;}
+      // On the shooting ruler, invert the edited clock while keeping all
+      // unselected replay times fixed. Selected points retain their spacing.
+      const display=offset=>{apply(offset);return this.rateDisplay(keys[anchor].progress,this.map());},target=this.displayTime(times[anchor],d.map)+delta;
+      const left=display(lo),right=display(hi),increasing=right>=left;
+      if(target<=Math.min(left,right)){display(increasing?lo:hi);return;}
+      if(target>=Math.max(left,right)){display(increasing?hi:lo);return;}
+      // Disjoint selections can shorten an earlier slow segment enough that
+      // their anchor moves the other way in shooting time.
+      for(let i=0;i<40;i++){const mid=(lo+hi)/2;if((display(mid)<target)===increasing)lo=mid;else hi=mid;}display((lo+hi)/2);
     }
     moveWork(p,d,e){
       if(Math.abs(p.x-d.x)<3&&!d.moved)return;
@@ -519,9 +583,9 @@
     }
     move(e){
       if(!this.drag)return;const p=this.point(e),d=this.drag;
-      if(['key','work'].includes(d.kind)&&!e.auto)this.autoPan(e);
+      if(['key','work','seek'].includes(d.kind)&&!e.auto)this.autoPan(e);
       if(d.kind==='work')return this.moveWork(p,d,e);
-      if(d.kind==='seek')return this.scrub(p.x,d.map,e);
+      if(d.kind==='seek')return this.scrub(p.x,this.free()?this.map():d.map,e);
       if(d.kind==='box'){
         const box=this.root.querySelector('.seq-box'),loX=Math.min(d.x,p.x),hiX=Math.max(d.x,p.x),loY=Math.min(d.y,p.y),hiY=Math.max(d.y,p.y);box.hidden=false;Object.assign(box.style,{left:loX+'px',top:loY+'px',width:hiX-loX+'px',height:hiY-loY+'px'});this.selected=new Set(d.prior);
         for(const row of this.rows())for(const key of row.keys){const x=row.name==='rate'?14+this.rateDisplay(key.progress)*this.scale:this.x(key.time_sec),y=row.name==='rate'?row.y+82-key.rate*65:row.y+12;if(x>=loX&&x<=hiX&&y>=loY&&y<=hiY)this.selected.add(key._id);}

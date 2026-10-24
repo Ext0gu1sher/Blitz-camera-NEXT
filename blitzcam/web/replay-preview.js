@@ -44,7 +44,18 @@ export class ReplayPreviewPane {
     if(progress!=null)bar.firstElementChild.style.width=Math.min(100,Math.max(0,progress*100)).toFixed(1)+'%';
     const m=el.querySelector('[data-msg]');m.textContent=msg;m.classList.toggle('pe-error',!!error);
   }
-  update({mode,time,tracks,smooth,easing,samples,replayFile}){
+  clear(){
+    ++this.generation;this.cancelParse?.();this.worker?.terminate();this.worker=null;this.cancelParse=null;
+    this.source=null;this.data=null;this.requestedPath=null;this.offset=0;
+    this.resetScene();
+    $('previewFile').textContent='未选择回放';$('previewFile').title='';
+    $('previewSourceFile').textContent='—';$('previewSourceFile').title='';
+    $('previewMap').textContent='';$('previewStatus').title='';$('previewOffset').value=0;
+    $('loadPreviewReplay').disabled=false;this.message('请选择当前项目的回放。');this.empty('载入回放');
+  }
+  update({mode,time,tracks,smooth,easing,samples,replayFile,projectPath}){
+    if(this.projectPath!==projectPath){this.projectPath=projectPath;this.clear();}
+    if(this.boundReplayFile!==replayFile){this.boundReplayFile=replayFile;if(!replayFile)this.clear();}
     if(this.mode!==mode||this.time!==time||this.lastTracks!==tracks||this.lastSmooth!==smooth||this.lastEasing!==easing){this.stopFlight();this.override=null;}
     this.mode=mode;this.active=mode==='replay';this.time=time;
     document.querySelector('.preview-panel').classList.toggle('preview3d-active',this.active);
@@ -74,7 +85,7 @@ export class ReplayPreviewPane {
       this.message('正在本机解析车辆运动和战斗时钟…');this.empty('正在载入回放…',{progress:.06,msg:'正在本机解析车辆运动和战斗时钟…'});
       const response=await fetch('/api/preview/replay/'+this.source.id);if(!response.ok)throw Error((await response.json()).error);
       const bytes=await response.arrayBuffer();if(gen!==this.generation)return;
-      this.data=await this.parse(bytes,gen);if(gen!==this.generation)return;
+      const data=await this.parse(bytes,gen);if(gen!==this.generation)return;this.data=data;
       this.sampler=createReplaySampler(this.data,this.source.replay_origin_sec);this.empty('正在载入回放…',{progress:.15,msg:'解析完成'});
       $('previewOffset').title='回放时钟已自动对齐；微调仅影响车辆预览，不移动镜头关键帧。';
       await post('/api/preview/prepare',{source_id:this.source.id,map_id:this.data.playback.meta.map_id,tank_ids:[...new Set(this.data.playback.vehicles.map(v=>v.tank_id))]});
@@ -113,7 +124,9 @@ export class ReplayPreviewPane {
     this.scene=new THREE.Scene();this.scene.add(new THREE.HemisphereLight(0xdcecff,0x766548,2.2));
     const light=new THREE.DirectionalLight(0xffefd7,2);light.position.set(-150,300,100);this.scene.add(light);
     this.observer=new THREE.PerspectiveCamera(50,16/9,.1,3000);this.observer.position.set(350,280,350);
-    this.shot=new THREE.PerspectiveCamera(50,16/9,.05,3000);
+    // Steam 11.21 replay FreeCamera uses a 1 m near plane (live reversed-Z
+    // projection[14] = 1). Keep the observer's close inspection plane separate.
+    this.shot=new THREE.PerspectiveCamera(50,16/9,1,3000);
     this.orbit=new OrbitControls(this.observer,this.renderer.domElement);this.orbit.target.set(0,20,0);this.orbit.enableDamping=false;this.orbit.maxDistance=1800;this.orbit.minDistance=.3;
     this.orbit.addEventListener('change',()=>this.render());
     this.guides=new PreviewGuides();this.pathGroup=this.guides.root;this.scene.add(this.pathGroup);this.assetsGroup=new THREE.Group();this.scene.add(this.assetsGroup);
@@ -344,7 +357,8 @@ export class ReplayPreviewPane {
     this.status='ready';$('previewEmpty').hidden=true;
     $('previewMap').textContent=`${manifest.map.display} · ${this.models.size} 辆车`;
     $('previewStatus').title=manifest.limitations.join(' ')+(errors.length?` ${errors.length} 辆缺少模型，用方块标记。`:'');
-    this.updatePath();this.fit();this.message('离线场景已载入 · 可前后拖动时间轴');this.render();
+    const missingAim=this.data.aim?.missing.length||0;
+    this.updatePath();this.fit();this.message('离线场景已载入 · 可前后拖动时间轴'+(missingAim?` · ${missingAim} 辆车缺少炮管俯仰参数`:''));this.render();
     this.adapter.ready?.();
     // Deterministic diagnostics, consumed by automated acceptance. No game API.
     window.BlitzReplayPreviewDiagnostics=()=>({state:this.status,time:this.time,offset:this.offset,replayOrigin:this.sampler?.origin,rawTime:this.sampler?.rawTime(this.time,this.offset),engine:this.data?.engine,source:this.source?.sha256,map:this.manifest?.map.key,visible:[...this.models].filter(([,v])=>v.root.visible).map(([eid,v])=>({eid,p:v.root.position.toArray()})),camera:this.shot?.position.toArray(),quaternion:this.shot?.quaternion.toArray(),angle:this.shot?.fov,triangles:this.renderer.info.render.triangles,geometryCount:this.renderer.info.memory.geometries,view:this.view,guides:this.guides?.diagnostics(),effects:this.effects?.diagnostics()});

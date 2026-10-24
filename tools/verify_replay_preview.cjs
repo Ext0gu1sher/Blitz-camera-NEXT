@@ -37,15 +37,18 @@ const out=path.resolve('output/replay-preview-091-acceptance');fs.mkdirSync(out,
     const impact=fx.timeline.events.find(e=>e.type==='impact');seekRaw(impact.time+.05);const hit=structuredClone(fx.diagnostics());
     const death=fx.timeline.deaths.find(e=>pane.sampler.poseAtRaw(e.eid,e.time,{lastKnown:true}));
     seekRaw(death.time+.6);const burst=structuredClone(fx.diagnostics()),wreck=pane.models.get(death.eid),wreckAmount=wreck.destroyedVisual.amount;
-    const deathPose=wreck.root.position.toArray();seekRaw(death.time+10);const deathPoseAfter=wreck.root.position.toArray();
+    const deathPose=wreck.root.position.toArray();seekRaw(death.time+10);
+    const current=pane.sampler.poseAtRaw(death.eid,death.time+10,{lastKnown:true})?.pose;
+    const wreckFollowsCurrent=current&&wreck.root.position.distanceTo({x:-current.x,y:current.y,z:current.z})<1e-8;
+    seekRaw(death.time+.6);const wreckSeekStable=JSON.stringify(deathPose)===JSON.stringify(wreck.root.position.toArray());
     seekRaw(death.time-.2);const aliveAmount=wreck.destroyedVisual.amount;
     seekRaw(entry.start+.05);pane.setView('observer');pane.orbit.target.copy(data.tip);pane.observer.position.copy(data.tip).add({x:18,y:9,z:18});pane.orbit.update();pane.render();
     return {shots:fx.timeline.shots.length,invalid:fx.timeline.invalidShots,fire,hit,burst,paused,backward,muzzlePreservesPose:before===after,
-      barrelReach:data.tip.distanceTo(data.from),wreckAmount,aliveAmount,wreckFrozen:JSON.stringify(deathPose)===JSON.stringify(deathPoseAfter),deathTime:death.time,deathEid:death.eid};
+      barrelReach:data.tip.distanceTo(data.from),wreckAmount,aliveAmount,wreckFollowsCurrent,wreckSeekStable,deathTime:death.time,deathEid:death.eid};
   });
   assert.equal(battleEffects.shots,80);assert.equal(battleEffects.invalid,0);assert.ok(battleEffects.fire.muzzles>0&&battleEffects.fire.tracers>0);
   assert.ok(battleEffects.hit.impacts>0&&battleEffects.hit.sparks>0);assert.ok(battleEffects.burst.bursts>0&&battleEffects.burst.wrecks>0);
-  assert.ok(battleEffects.paused&&battleEffects.backward&&battleEffects.muzzlePreservesPose&&battleEffects.wreckFrozen);
+  assert.ok(battleEffects.paused&&battleEffects.backward&&battleEffects.muzzlePreservesPose&&battleEffects.wreckFollowsCurrent&&battleEffects.wreckSeekStable);
   assert.ok(battleEffects.barrelReach>=.3&&battleEffects.barrelReach<=15);assert.ok(battleEffects.wreckAmount>0);assert.equal(battleEffects.aliveAmount,0);
   await page.locator('#replayScene').screenshot({path:path.join(out,'muzzle-fire.png')});
   await page.evaluate(({deathTime,deathEid})=>{const p=replayPreviewPane;seek(deathTime+.4-p.sampler.origin-p.offset);const model=p.models.get(deathEid);p.orbit.target.copy(model.root.position);p.observer.position.copy(model.root.position).add({x:18,y:10,z:18});p.orbit.update();p.render();},battleEffects);

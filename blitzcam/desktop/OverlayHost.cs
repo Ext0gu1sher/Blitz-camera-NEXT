@@ -695,6 +695,22 @@ namespace BlitzCamera {
             host.RefreshVisibility(false,new WindowInteropHelper(this).Handle);await Task.Delay(40);
             host.RefreshVisibility(false,host.Game);await SettleOverlaySmoke();await Task.Delay(160);
             if(host.AutoHidden||host.Panels.Values.Any(p=>!p.Shown||((UIElement)p.Content).Opacity!=1||!p.IsHitTestVisible))throw new Exception("Rapid focus reversal left an old fade hiding the overlay");
+            foreach(var panel in host.Panels.Values){
+              // Simulate a single HWND losing visibility while its requested
+              // state stays visible, then recover through the normal refresh.
+              Native.ShowWindow(panel.Handle,0);
+              host.RefreshVisibility(false,host.Game);await SettleOverlaySmoke();
+              if(host.Panels.Values.Any(p=>!p.Shown||((UIElement)p.Content).Opacity!=1||!p.IsHitTestVisible))throw new Exception("Single-panel visibility drift was not repaired: "+panel.Kind);
+              ((UIElement)panel.Content).Opacity=0;
+              Native.SetWindowLong(panel.Handle,-20,Native.GetWindowLong(panel.Handle,-20)|0x20);
+              host.RefreshVisibility(false,panel.Handle);await SettleOverlaySmoke();
+              if(!panel.Shown||((UIElement)panel.Content).Opacity!=1||(Native.GetWindowLong(panel.Handle,-20)&0x20)!=0)throw new Exception("Single-panel opacity/input drift was not repaired: "+panel.Kind);
+              host.RefreshVisibility(false,new WindowInteropHelper(this).Handle);await Task.Delay(25);
+              host.RefreshVisibility(false,host.Game);await Task.Delay(25);
+              Native.ShowWindow(panel.Handle,0);
+              host.RefreshVisibility(false,host.Game);await SettleOverlaySmoke();
+              if(host.Panels.Values.Any(p=>!p.Shown||((UIElement)p.Content).Opacity!=1||!p.IsHitTestVisible))throw new Exception("Interrupted panel fade did not recover: "+panel.Kind);
+            }
             Native.ShowWindow(host.Game,6);host.RefreshVisibility(false,host.Game);
             if(!host.AutoHidden||host.Hidden||host.Panels.Values.Any(p=>p.Shown)||!IsVisible)throw new Exception("Game minimization did not suspend only the overlay");
             Native.ShowWindow(host.Game,4);host.RefreshVisibility(false,host.Game);
@@ -708,7 +724,7 @@ namespace BlitzCamera {
           try{host.ApplySettings(new Dictionary<string,object>{{"hideKey",hideBefore},{"captureKey",hideBefore}});}catch(ArgumentException){conflictRejected=true;}
           if(!conflictRejected||host.HideKey!=hideBefore||host.CaptureKey!=captureBefore)throw new Exception("Conflicting key assignment was not rejected atomically");
           host.SetOverlayHidden(true);
-          File.WriteAllText(Path.Combine(host.Root,"output/desktop-overlay-smoke.json"),Host.Json.Serialize(new{hidePreservedWorkbench=true,revealPassed=true,collapsePassed=true,positiveCaptureSize=true,minimizeHides=true,restoreReveals=true,backgroundHides=true,foregroundRestores=true,fastMoveAndResizeFollow=true,focusFadeOut=true,focusFadeIn=true,fadeClickThrough=true,rapidFocusReversal=true,panelInteractionVisible=true,layoutPreserved=true,manualHidePreserved=true,keyConflictRejected=true,cycles=3}));
+          File.WriteAllText(Path.Combine(host.Root,"output/desktop-overlay-smoke.json"),Host.Json.Serialize(new{hidePreservedWorkbench=true,revealPassed=true,collapsePassed=true,positiveCaptureSize=true,minimizeHides=true,restoreReveals=true,backgroundHides=true,foregroundRestores=true,fastMoveAndResizeFollow=true,focusFadeOut=true,focusFadeIn=true,fadeClickThrough=true,rapidFocusReversal=true,singlePanelRecovery=true,interruptedPanelFadeRecovery=true,panelInteractionVisible=true,layoutPreserved=true,manualHidePreserved=true,keyConflictRejected=true,cycles=3}));
         }
         if(Environment.GetEnvironmentVariable("BLITZCAM_CAPTURE_SMOKE")=="1"){
           host.SetOverlayHidden(true);
@@ -916,7 +932,7 @@ namespace BlitzCamera {
     public bool Collapsed,Ready;
     readonly Host host;readonly Border border;readonly RowDefinition bodyRow;readonly double expandedHeight,settingsHeight;
     readonly TextBlock summary;readonly Button collapse;
-    bool initialized,settingsOpen,requestedShown,visibilityKnown;
+    bool initialized,settingsOpen,requestedShown,visibilityKnown,visibilityAnimating;
     int visibilityVersion;
     public double Scale{get{try{return Native.GetDpiForWindow(Handle)/96.0;}catch{return 1;}}}
     double FullHeight{get{return Kind=="connection"&&settingsOpen?settingsHeight:expandedHeight;}}
@@ -961,13 +977,18 @@ namespace BlitzCamera {
     public bool SetShown(bool value,bool animate=false){
       // Window.Hide propagates a zero capture size to WebView2's composition
       // control on some drivers. Hide the HWND without collapsing its layout.
-      if(visibilityKnown&&requestedShown==value&&(animate||!border.HasAnimatedProperties)){
-        if(value)Topmost=host.Game!=IntPtr.Zero&&!host.Smoke;
+      // A focus transition can hide one HWND independently of our requested
+      // state. Only skip a request when the real window still agrees with it.
+      bool interactive=IsHitTestVisible==value&&(Handle==IntPtr.Zero||((Native.GetWindowLong(Handle,-20)&0x20)==0)==value);
+      bool settled=!visibilityAnimating&&!border.HasAnimatedProperties&&Shown==value&&border.Opacity==(value?1:0);
+      if(visibilityKnown&&requestedShown==value&&interactive&&(settled||(animate&&visibilityAnimating&&Shown))){
+        if(value)RestoreTopmost();
         SendStatus();
         return false;
       }
       visibilityKnown=true;requestedShown=value;int version=++visibilityVersion;
       double from=Shown?border.Opacity:0,target=value?1:0;
+      visibilityAnimating=false;
       border.BeginAnimation(UIElement.OpacityProperty,null);border.Opacity=from;
       IsHitTestVisible=value;
       bool created=value&&!IsVisible;
@@ -976,9 +997,10 @@ namespace BlitzCamera {
         // A fading window must not intercept clicks intended for the newly focused app.
         int style=Native.GetWindowLong(Handle,-20);
         Native.SetWindowLong(Handle,-20,value?style&~0x20:style|0x20);
-        if(value){Topmost=host.Game!=IntPtr.Zero&&!host.Smoke;if(!Shown)Native.ShowWindow(Handle,4);}
+        if(value){if(!Shown)Native.ShowWindow(Handle,4);RestoreTopmost();}
       }
       if(animate&&Shown&&Math.Abs(from-target)>.001){
+        visibilityAnimating=true;
         var fade=new DoubleAnimation(from,target,TimeSpan.FromMilliseconds(140)){EasingFunction=new QuadraticEase{EasingMode=EasingMode.EaseInOut}};
         fade.Completed+=delegate{CompleteVisibility(value,version);};
         border.BeginAnimation(UIElement.OpacityProperty,fade,HandoffBehavior.SnapshotAndReplace);
@@ -988,8 +1010,15 @@ namespace BlitzCamera {
     }
     void CompleteVisibility(bool value,int version){
       if(version!=visibilityVersion||value!=requestedShown)return;
+      visibilityAnimating=false;
       border.BeginAnimation(UIElement.OpacityProperty,null);border.Opacity=value?1:0;
       if(!value){Topmost=false;if(Handle!=IntPtr.Zero&&Shown)Native.ShowWindow(Handle,0);}
+    }
+    void RestoreTopmost(){
+      bool topmost=host.Game!=IntPtr.Zero&&!host.Smoke;
+      Topmost=topmost;
+      if(Handle!=IntPtr.Zero&&((Native.GetWindowLong(Handle,-20)&0x8)!=0)!=topmost)
+        Native.SetWindowPos(Handle,new IntPtr(topmost?-1:-2),0,0,0,0,0x13);
     }
     public void ToggleCollapsed(){if(Collapsed)Expand();else{Collapsed=true;bodyRow.Height=new GridLength(0);Height=34;summary.Visibility=Visibility.Visible;collapse.Content="+";collapse.ToolTip="展开";host.PositionAll();}}
     public void Expand(){Collapsed=false;Web.Height=FullHeight-34;Height=FullHeight;bodyRow.Height=new GridLength(1,GridUnitType.Star);summary.Visibility=Visibility.Collapsed;collapse.Content="−";collapse.ToolTip="折叠";host.PositionAll();}

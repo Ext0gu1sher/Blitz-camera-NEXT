@@ -17,7 +17,7 @@ from .paths import OUTPUT
 from .replay_timeline import file_timeline
 from .replay_clock import replay_origin
 
-PIPELINE_VERSION = 'preview-1'
+PIPELINE_VERSION = 'preview-2-culling'
 MAX_REPLAY_BYTES = 64 * 1024 * 1024
 
 

@@ -55,7 +55,7 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.match(await scene.locator('.bc-error').textContent(),/回放资源无法读取/);await scene.locator('#startupContinue').click();await ready(scene);await scene.close();
 
   const home=await pageFor({reducedMotion:'reduce'});await home.goto(base+'/?home=1');await ready(home);
-  assert.equal(await home.locator('#homeView').isVisible(),true);assert.match(await home.locator('.home-title').textContent(),/Blitz Camera NEXT/);
+  assert.equal(await home.locator('#homeView').isVisible(),true);assert.equal(await home.locator('.home-title').textContent(),'最近项目');
   await home.locator('#settingsButton').click();await home.waitForFunction(()=>!settingsLoading);assert.equal(await home.locator('#settingsView').isVisible(),true);await home.close();
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(game,[]);
   const result={passed:true,opaqueUntilReady:true,normalAnimation:true,slowSampleWait:true,slowSceneWait:true,failureRetry:true,partialFailureEnterEditor:true,reducedMotion:true,realHomeAndWorkbench:true,errors,external,game};

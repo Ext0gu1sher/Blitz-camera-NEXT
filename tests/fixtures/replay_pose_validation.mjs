@@ -44,6 +44,36 @@ for(const times of [[40,42,41.8127],[40,41,41]]){
   assert.throws(()=>createReplaySampler(bundle,origin),/时间顺序异常/);
 }
 
+// Destruction changes the material/life state, not the recorded motion clock.
+// Follow WotbTools' current-time pose sampling while holding the last observed
+// position through coverage/visibility gaps and after the final record.
+for(const hasCurve of [true,false]){
+  const bundle=structuredClone(base),v=bundle.playback.vehicles[0];v.death_t=40.5;
+  if(!hasCurve)delete v.pose_kf;
+  const saved=structuredClone(bundle),sampler=createReplaySampler(bundle,origin),first=hasCurve?300:100;
+  for(const raw of [40.25,40.5,41,42.5,41,40.25]){
+    const frame=sampler.at(raw-origin).find(f=>f.eid===7);
+    assert.ok(Math.abs(frame.pose.x-(first+10*(raw-40)))<1e-8,'wreck must follow recorded displacement');
+    assert.equal(frame.life.lifeState,raw>=40.5?'DESTROYED':'ALIVE');
+  }
+  assert.deepEqual(sampler.at(45-origin).find(f=>f.eid===7).pose,sampler.at(44-origin).find(f=>f.eid===7).pose,'no extrapolation after final pose');
+  assert.deepEqual(bundle,saved);
+  for(const field of ['coverage','visibility']){
+    const hidden=structuredClone(bundle);
+    if(field==='coverage')hidden.playback.vehicles[0].coverage=[40,41,42,43];
+    else hidden.playback.visibility.splice(0,1,{eid:7,t_in:40,t_out:41},{eid:7,t_in:42,t_out:43});
+    const sample=createReplaySampler(hidden,origin),at=raw=>sample.at(raw-origin).find(f=>f.eid===7);
+    assert.equal(at(41.5).pose.x,first+10,'hidden wreck holds the last observation');
+    assert.ok(Math.abs(at(42.5).pose.x-(first+25))<1e-8,'new observations resume wreck motion');
+    hidden.playback.vehicles[0].resurrection_times=[41.2];hidden.playback.vehicles[0].death_times=[40.5,42.2];
+    const resurrected=createReplaySampler(hidden,origin);
+    assert.equal(resurrected.at(41.5-origin).find(f=>f.eid===7),undefined,'resurrected hidden vehicle is not a persistent wreck');
+    assert.equal(resurrected.at(42.5-origin).find(f=>f.eid===7).life.lifeState,'DESTROYED');
+  }
+  v.death_t=39;const early=createReplaySampler(bundle,origin);
+  assert.equal(early.at(39.5-origin).find(f=>f.eid===7),undefined,'destruction cannot reveal a future first position');
+}
+
 // Incomplete/nonfinite curves and invalid base grids still fail closed.
 for(const corrupt of [
   v=>v.pose_kf.t[1]=NaN,

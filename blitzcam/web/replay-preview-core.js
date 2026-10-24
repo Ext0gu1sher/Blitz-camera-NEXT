@@ -60,7 +60,10 @@ export function createReplaySampler(bundle,replayOrigin){
       const def=selectActiveDef(defs,starts.get(account),raw-clock.startRaw);
       if(!def)continue;
       const life=defLifeAt(originals.get(def.eid),raw),dead=life?.lifeState==='DESTROYED';
-      const frame=poseAtRaw(def.eid,dead?Math.min(raw,life.destroyedKnownAtSec):raw,{lastKnown:dead});
+      // Like WotbTools applyPose, wrecks keep following the recorded pose at
+      // the current clock. Only missing observations hold the last known pose;
+      // death itself must not freeze sliding, falling or subsequent impacts.
+      const frame=poseAtRaw(def.eid,raw,{lastKnown:dead});
       if(frame)frames.push({...frame,life});
     }
     return frames;
