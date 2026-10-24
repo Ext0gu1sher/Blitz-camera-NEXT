@@ -1,0 +1,33 @@
+{
+  "agent_commit": "8dcec2c6463f23116871157ef6d64985875efd67",
+  "agent_release": "v0.4.9",
+  "wotbtools_commit": "11d0d519aba2afedcae3d49365b0bfd1a4b5c76d",
+  "use": "Private offline preview; game resources read from installed client, never bundled",
+  "source_sha256": {
+    "Agent-LICENSE": "31c55842770aac77828395dff754b46f695fa20b30258283ed22e19310c79326",
+    "export_map_glb.py": "3ffb6a4070831ae39bdef678b0137eae4dd1112d5c12261f634207aa2b90a17e",
+    "export_tank_glb.py": "30954d996e4bcf25fd7a7a6b1ae18203a1e63b37e042801689ba877679b1ae20",
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "data\\models.pb": "9463818082226aec2bec5af0f54b6c61d8f6c4bc877b406f7bace129d42f84fa",
+    "data\\tanks.pb": "33a53d9ef3eda121c103dc8fe639fc5d736b68c96941b6719830468f82061ebb",
+    "wotbtools\\dlc_packs.py": "dff5b109f773150888f06a92e491b490fec74241484eb6f3cd8bcade929d339a",
+    "wotbtools\\LICENSE": "31c55842770aac77828395dff754b46f695fa20b30258283ed22e19310c79326",
+    "wotbtools\\wotb_cube.py": "9e4377e3add550eeb0ee907773b14f3cadd976e58bb94b4356048013825edea6",
+    "wotbtools\\wotb_sc2.py": "0e07cbafeeb5c2c2d425120f1c4195084cf2b528690c1c22cfb66e4a1ae240d4",
+    "wotbtools\\wotb_scg.py": "57a9e11d74b0575ee4988082096b733973dad59511946780f9384e1dbb1c68cf"
+  },
+  "battle_effect_source_sha256": {
+    "scene/battleFx.js": "e1685d99bb0f8c6cc9a0af74b5936ce1e634569e2b25380aa963938179642f86",
+    "scene/shotPath.js": "a461f6b660ef9040374b8e2cdddf3d359df30fe3a679d206eb810fee72d982fc",
+    "scene/impactKind.js": "65f71790b9faf58dd8afb89b4a7636acd731eede850b86de72efa71320eadea5",
+    "scene/tankDestroyedVisual.js": "5aaae300ef27d42241a5a6016e6c76c4b25b88ca60e8ada85baf3b634acc9419",
+    "utils/battlePlaybackV2.ts": "174e0962c6c1dd202dc1e4d904784daaa35a949b9dfad864eb89f897f277a0df"
+  },
+  "replay_engine": {
+    "repo": "https://github.com/fanypcd/WoT-Blitz-Agent",
+    "release": "v0.4.11",
+    "commit": "0a9da93a0074a95af406db3468e6a81a5a6b139f",
+    "release_zip_sha256": "8170ba26b289e1952ed04d92f572a596a0503c988b86316c008b57a3fbec96f6"
+  },
+  "agent_source_scope": "Asset exporters and metadata only; browser parser is recorded under replay_engine"
+}

@@ -1,0 +1,5 @@
+{
+  "bindgen": "wasm-bindgen 0.2.127",
+  "upstream_commit": "0a9da93a0074a95af406db3468e6a81a5a6b139f",
+  "tag": "v0.4.11"
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "quaternion_order": "wxyz",
+  "fov_axis": "horizontal",
+  "timing": "constant_speed",
+  "easing": "linear",
+  "position_interpolation": "smooth",
+  "arc_tolerance": 1e-06,
+  "keyframes": [
+    {
+      "time_sec": 0.0,
+      "position": [
+        -71.52263641357422,
+        232.59115600585938,
+        36.746612548828125
+      ],
+      "quaternion": [
+        0.2077012599464586,
+        0.19473147926368625,
+        0.6556559179647671,
+        0.6993247849448846
+      ],
+      "horizontal_fov_deg": 68.41167535035929
+    },
+    {
+      "time_sec": 8.0,
+      "position": [
+        -78.24462127685547,
+        222.27297973632812,
+        35.95203399658203
+      ],
+      "quaternion": [
+        0.2077012599464586,
+        0.19473147926368625,
+        0.6556559179647671,
+        0.6993247849448846
+      ],
+      "horizontal_fov_deg": 68.41167535035929
+    }
+  ]
+}

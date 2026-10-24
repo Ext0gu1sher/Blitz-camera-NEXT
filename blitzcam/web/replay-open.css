@@ -1,0 +1,4 @@
+.launch-error{color:#ff9b92!important}
+.replay-file{overflow-wrap:anywhere;color:#a9c9c9}
+[data-panel=connection] .message{line-height:1.25;margin:3px 0}
+#replaySummary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

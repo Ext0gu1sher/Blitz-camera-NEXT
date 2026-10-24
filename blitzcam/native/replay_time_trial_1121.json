@@ -1,0 +1,9 @@
+{
+  "config_size": 144,
+  "header_size": 72,
+  "event_size": 92,
+  "events_offset": 216,
+  "shared_size": 377048,
+  "sha256": "2fd8c56274dcbf38d4e8cb3ae84690689e22faa659470afbfe6e2de6c31ea14f",
+  "dll": "replay_time_trial_1121.2fd8c56274dc.dll"
+}

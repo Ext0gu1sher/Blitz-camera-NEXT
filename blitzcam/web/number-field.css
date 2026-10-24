@@ -1,0 +1,19 @@
+/* Numbers read as values until the user explicitly enters text mode. */
+.number-field{display:inline-flex;position:relative;min-width:58px;width:80px;vertical-align:middle;flex-shrink:0;font:10px var(--num,Consolas,monospace)}
+.number-field>.number-value{display:block;width:100%;min-width:0;margin:0;padding:3px 5px;border:1px solid transparent;border-bottom:1px dotted #67764680;border-radius:2px;background:transparent;box-shadow:none;color:var(--lime,#cfed83);font:inherit;text-align:left;white-space:nowrap;cursor:move;touch-action:none;user-select:none}
+.number-field>.number-value:hover:not(:disabled),.number-field.number-dragging>.number-value{background:#cfed8310;border-bottom-color:var(--lime,#cfed83);color:#e6f7be}
+.number-field>.number-value:disabled{cursor:default;opacity:.45;border-color:transparent}
+.number-field[data-readonly=true]>.number-value{opacity:.8;color:inherit}
+.number-field>.number-input{display:none;width:100%;min-width:0;margin:0;padding:3px 5px;border:1px solid #637f3d;border-radius:3px;background:#161616;color:var(--lime,#cfed83);font:inherit;box-sizing:border-box}
+.number-field.number-editing>.number-value{display:none}
+.number-field.number-editing>.number-input{display:block}
+.number-field>.number-input[aria-invalid=true]{border-color:var(--danger,#ff9b92)}
+.number-field.number-dragging[data-scrub-axis=x],.number-field[data-scrub-axis=x]>.number-value{cursor:ew-resize}
+.number-field.number-dragging[data-scrub-axis=y],.number-field[data-scrub-axis=y]>.number-value{cursor:ns-resize}
+.speed-point-fields .number-field{width:64px}
+.ce-grid2 .number-field{width:100%;min-width:0}
+.input-with-unit>.number-field{width:100%;font-size:11px}
+.preview-alignment .number-field{width:70px}
+.mini-duration .number-field{width:80px;font-size:12px}
+[data-panel=capture] label>.number-field{display:flex;float:none;width:100%;margin-top:6px;font-size:12px}
+[data-panel=capture] label>.capture-label{float:none;font-size:11px}

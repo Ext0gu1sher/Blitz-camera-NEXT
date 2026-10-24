@@ -1,0 +1,65 @@
+# Personal projects, captures, diagnostics, caches and portable releases.
+/output/
+/dist/
+*.wotbreplay
+*.dmp
+*.mdmp
+*.log
+/nul
+
+# Python, JavaScript and editor caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Machine-local settings and credentials.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+
+# Downloaded toolchains, dependency runtimes and generated desktop hosts.
+/tools/zig-*/
+/tools/zig-cache/
+/tools/*.zip
+/tools/*.nupkg
+/tools/overlay-runtime/
+/blitzcam/preview_runtime/*
+!/blitzcam/preview_runtime/imagecodecs-provenance.json
+
+# External source checkouts and machine-specific investigation output.
+/research/source/
+/research/builds/
+/research/local/
+/research/runtime/*
+!/research/runtime/readonly-session-evidence.json
+
+# Game-derived metadata is restored locally from the pinned upstream source.
+/blitzcam/preview_vendor/data/
+
+# Compiled intermediates; retain only the exact native runtime DLLs referenced
+# by the tracked manifests so a checkout can run the offline regression suite.
+*.exe
+*.dll
+*.pyd
+*.pdb
+*.lib
+*.obj
+*.ilk
+*.exp
+!/blitzcam/native/freecamera_switch_1121.fd4bfdb02ff2.dll
+!/blitzcam/native/position_hook_1121.c4b1cefb4342.dll
+!/blitzcam/native/replay_seek_phase_trial_1121.427643ebb1e7.dll
+!/blitzcam/native/replay_seek_trial_1121.43fae9ec8448.dll
+!/blitzcam/native/replay_time_trial_1121.2fd8c56274dc.dll

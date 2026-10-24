@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Blitz Camera NEXT · 摄影工作台</title>
+  <style>html,body{background:#171717}#appSplash{position:fixed;inset:0;z-index:10000;background:#171717}</style>
+  <link rel="stylesheet" href="/startup.css">
+  <script src="/startup.js" defer></script>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/timeline.css">
+  <link rel="stylesheet" href="/replay-open.css">
+  <link rel="stylesheet" href="/replay-preview.css">
+  <script type="module" src="/replay-preview.js"></script>
+  <script src="/preview-time.js" defer></script>
+  <script src="/keyframe-clipboard.js" defer></script>
+  <script src="/timeline.js" defer></script>
+  <script src="/speed-editor.js" defer></script>
+  <script src="/editor-session.js" defer></script>
+  <link rel="stylesheet" href="/number-field.css">
+  <script src="/number-field.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body class="workbench-060 app-starting">
+  <section id="appSplash" aria-label="Blitz Camera NEXT 正在启动" aria-busy="true">
+    <div class="bc-halo" aria-hidden="true"></div>
+    <div class="bc-safe-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="bc-brand">
+      <div class="bc-symbol" aria-hidden="true">
+        <div class="bc-focus"><i></i><i></i><i></i><i></i></div>
+        <div class="bc-symbol-inner"><div class="bc-glyph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16 3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94"/></svg></div></div>
+        <div class="bc-focus-dot"></div>
+      </div>
+      <div class="bc-wordmark"><span>Blitz Camera</span></div>
+      <div class="bc-next" aria-label="NEXT"><span>N</span><span>E</span><span>X</span><span>T</span></div>
+    </div>
+    <div class="bc-loading">
+      <div class="bc-loading-rail"><div class="bc-loading-light"></div></div>
+      <div class="bc-loading-label" role="status" aria-live="polite">正在准备工作台</div>
+      <div class="bc-error" role="alert" hidden></div>
+      <div class="bc-error-actions" hidden><button type="button" id="startupRetry">重新加载</button><button type="button" id="startupContinue" hidden>进入工作台</button></div>
+    </div>
+    <span class="bc-footnote">爱吹灭火器的思源 - 2026</span>
+    <div class="bc-window" hidden>
+      <button class="wc" data-window="minimize" title="最小化" aria-label="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
+      <button class="wc" data-window="maximize" title="最大化" aria-label="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
+      <button class="wc wc-close" data-window="close" title="关闭" aria-label="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+  </section>
+  <svg class="sprite" aria-hidden="true" style="display:none">
+    <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16 3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94"/></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path d="M4.5 2.5 13 8l-8.5 5.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 16 16"><path d="M5 3v10M11 3v10" stroke-width="2.4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-reverse" viewBox="0 0 16 16"><path d="M11.5 2.5 3 8l8.5 5.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-loop" viewBox="0 0 16 16"><path d="M3 8a5 5 0 0 1 8.6-3.4M13 8a5 5 0 0 1-8.6 3.4"/><path d="M11.6 1.8v3h-3M4.4 14.2v-3h3"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 16 16"><path d="M3 2.5v11" stroke-width="2"/><path d="M12.5 2.5 5 8l7.5 5.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-next" viewBox="0 0 16 16"><path d="M13 2.5v11" stroke-width="2"/><path d="M3.5 2.5 11 8l-7.5 5.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 16 16"><path d="M6.5 3.5 3 7l3.5 3.5"/><path d="M3.5 7h6a4 4 0 0 1 0 8H8"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 16 16"><path d="M9.5 3.5 13 7l-3.5 3.5"/><path d="M12.5 7h-6a4 4 0 0 0 0 8H8"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5V2.5h-8v8H5"/></symbol>
+    <symbol id="i-paste" viewBox="0 0 16 16"><rect x="5" y="1.5" width="6" height="3" rx="1"/><path d="M5 3H3v11h10V3h-2M5.5 7h5M5.5 10h5"/></symbol>
+    <symbol id="i-snap" viewBox="0 0 16 16"><path d="M4.5 2v5.5a3.5 3.5 0 0 0 7 0V2"/><path d="M4.5 2h3M8.5 2h3M4.5 5.5h3M8.5 5.5h3"/><path d="M8 11v3.5"/></symbol>
+    <symbol id="i-zoom-in" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14M7 4.8v4.4M4.8 7h4.4"/></symbol>
+    <symbol id="i-zoom-out" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14M4.8 7h4.4"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 16 16"><path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5"/></symbol>
+    <symbol id="i-range" viewBox="0 0 16 16"><path d="M2.5 3v10M13.5 3v10"/><rect x="5.5" y="5.5" width="5" height="5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 2h4.5A1.5 1.5 0 0 1 14 6.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/><path d="M2 6h12"/></symbol>
+    <symbol id="i-import" viewBox="0 0 16 16"><path d="M8 2v7.5M4.8 6.8 8 10l3.2-3.2"/><path d="M2.5 11v1.5A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V11"/></symbol>
+    <symbol id="i-export" viewBox="0 0 16 16"><path d="M8 10V2M4.8 5.2 8 2l3.2 3.2"/><path d="M2.5 11v1.5A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V11"/></symbol>
+    <symbol id="i-save" viewBox="0 0 16 16"><path d="M3 2.5h8L13.5 5v8a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5z"/><path d="M5 2.5V6h6V2.5M5 13.5v-4h6v4"/></symbol>
+    <symbol id="i-save-as" viewBox="0 0 16 16"><path d="M3 2.5h8L13.5 5v8a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5z"/><path d="M5 2.5V6h6V2.5M5 13.5v-4h6v4"/><path d="M11.5 9.5v5M9 12h5" stroke-width="1.3"/></symbol>
+    <symbol id="i-film" viewBox="0 0 16 16"><rect x="1.5" y="4.5" width="13" height="9" rx="1"/><path d="M1.5 7h13M4.3 4.6l1.1 2.1M7.6 4.6l1.1 2.1M10.9 4.6l1.1 2.1"/></symbol>
+    <symbol id="i-game" viewBox="0 0 16 16"><rect x="1.3" y="2" width="13.4" height="12" rx="2"/><rect x="3.4" y="9.2" width="9.2" height="2.6" rx="1.3"/><path d="M5 9.2V6.7h4l1.2 2.5M9 7.5h3.5"/></symbol>
+    <symbol id="i-fly" viewBox="0 0 16 16"><path d="M8 2 14 13l-6-2.5L2 13zM8 2v8.5"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5a3.3 3.3 0 0 0 4.6.4l2-2a3.3 3.3 0 0 0-4.6-4.6l-1 1"/><path d="M9.5 6.5a3.3 3.3 0 0 0-4.6-.4l-2 2a3.3 3.3 0 0 0 4.6 4.6l1-1"/></symbol>
+    <symbol id="i-unlink" viewBox="0 0 16 16"><path d="M6.5 9.5a3.3 3.3 0 0 0 4.6.4l2-2a3.3 3.3 0 0 0-4.6-4.6l-1 1"/><path d="M9.5 6.5a3.3 3.3 0 0 0-4.6-.4l-2 2a3.3 3.3 0 0 0 4.6 4.6l1-1"/><path d="M2 14 14 2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 16 16"><path d="M8 3l4.5 5L8 13 3.5 8z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke-width="1.8"/></symbol>
+    <symbol id="i-record" viewBox="0 0 16 16"><path d="M7 3.6 10.8 8 7 12.4 3.2 8z"/><path d="M13.2 9v5M10.7 11.5h5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2v3h-3"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6"/><path d="M8 4.8V8l2.4 1.6"/></symbol>
+    <symbol id="i-pip" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.2"/><rect x="7.5" y="8" width="4.6" height="3.2" rx=".7" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-min" viewBox="0 0 16 16"><path d="M3.5 8h9"/></symbol>
+    <symbol id="i-max" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx=".6"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 16 16"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></symbol>
+    <symbol id="i-replace" viewBox="0 0 16 16"><path d="M3 6.5a5 5 0 0 1 9-1.5M13 9.5a5 5 0 0 1-9 1.5"/><path d="M12 2v3h-3M4 14v-3h3"/></symbol>
+    <symbol id="i-path" viewBox="0 0 16 16"><circle cx="3.5" cy="12.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="12.5" cy="3.5" r="1.6" fill="currentColor" stroke="none"/><path d="M4.8 11.3C7 8 9 8.5 10.5 5.3" stroke-dasharray="2 1.6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5 6.5 12 13 4.5" stroke-width="1.8"/></symbol>
+    <symbol id="i-inpoint" viewBox="0 0 16 16"><path d="M4.5 2.5v11M7.5 8h5M10.5 5.5 13 8l-2.5 2.5"/></symbol>
+    <symbol id="i-locate-start" viewBox="0 0 16 16"><path d="M3 3v10M13 8H6M9 5 6 8l3 3"/></symbol>
+    <symbol id="i-target" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-home" viewBox="0 0 16 16"><path d="M2 8 8 2.5 14 8M4 7.5V13h8V7.5"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 16 16"><path d="M4 1.5h5.5L13 5v9.5H4zM9.5 1.5V5H13"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 16 16"><path d="m6.4 1.8-.3 1.7-1.2.7-1.6-.5-1.6 2.7 1.3 1.1v1.4L1.7 10l1.6 2.7 1.6-.5 1.2.7.3 1.7h3.2l.3-1.7 1.2-.7 1.6.5 1.6-2.7L13 8.9V7.5l1.3-1.1-1.6-2.7-1.6.5-1.2-.7-.3-1.7Z"/><circle cx="8" cy="8.2" r="2.1"/></symbol>
+  </svg>
+
+  <header class="titlebar" id="titlebar">
+    <button class="ib tb-home" id="homeButton" title="主页" aria-label="主页"><svg class="ic"><use href="#i-home"/></svg></button>
+    <span class="tb-brand"><svg class="ic tb-logo"><use href="#i-logo"/></svg>Blitz Camera <small class="brand-next">NEXT</small></span>
+    <span class="tb-project"><span id="projectName">未命名项目</span><i class="dirty-dot" id="dirtyDot" title="未保存草稿" hidden></i></span>
+    <fieldset class="mode-switch" id="modeSwitch" title="">
+      <label><input type="radio" name="shootingMode" value="camera_only"><span>仅镜头</span></label>
+      <label><input type="radio" name="shootingMode" value="replay" checked><span>随对局</span></label>
+    </fieldset>
+    <div class="tb-actions">
+      <button class="ib" id="playProjectReplay" title="在游戏中播放项目回放" aria-label="在游戏中播放项目回放" disabled><svg class="ic"><use href="#i-game"/></svg></button>
+      <button class="ib" id="connectButton" title="连接客户端" aria-label="连接客户端" disabled><svg class="ic"><use href="#i-link"/></svg></button>
+      <button class="ib" id="disconnectButton" title="断开客户端" aria-label="断开客户端" disabled><svg class="ic"><use href="#i-unlink"/></svg></button>
+      <button class="ib" id="openReplayButton" title="打开回放文件" aria-label="打开回放文件" disabled><svg class="ic"><use href="#i-film"/></svg><span class="sr-only" data-label>打开回放文件…</span></button>
+      <button class="ib" id="importButton" title="打开项目…" aria-label="打开项目…" disabled><svg class="ic"><use href="#i-folder"/></svg></button>
+      <button class="ib" id="exportButton" title="另存为…" aria-label="另存为…" disabled><svg class="ic"><use href="#i-save-as"/></svg></button>
+      <button class="ib pri" id="saveButton" title="保存 Ctrl+S" aria-label="保存 Ctrl+S" disabled><svg class="ic"><use href="#i-save"/></svg></button>
+      <button class="ib" id="openOverlay" title="悬浮小窗" aria-label="悬浮小窗"><svg class="ic"><use href="#i-pip"/></svg></button>
+      <button class="ib" id="settingsButton" title="设置" aria-label="设置" aria-pressed="false"><svg class="ic"><use href="#i-settings"/></svg></button>
+    </div>
+    <span class="version-label">0.9.4 · STEAM 11.21</span>
+    <div class="window-controls" id="windowControls" hidden>
+      <button class="wc" id="winMin" title="最小化" aria-label="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
+      <button class="wc" id="winMax" title="最大化" aria-label="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
+      <button class="wc wc-close" id="winClose" title="关闭" aria-label="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+    </div>
+  </header>
+
+  <main class="home" id="homeView" hidden>
+    <aside class="home-side">
+      <button class="home-new" id="homeNew"><svg class="ic"><use href="#i-doc"/></svg><span data-label>新建项目</span></button>
+      <div class="home-new-row" id="homeNewRow" hidden><input id="homeNewName" placeholder="项目名称" aria-label="项目名称"></div>
+      <button class="home-link" id="homeOpen"><svg class="ic"><use href="#i-folder"/></svg><span data-label>打开项目</span></button>
+      <nav class="home-nav"><a class="home-nav-item active" id="homeNavHome"><svg class="ic"><use href="#i-home"/></svg>主页</a></nav>
+    </aside>
+    <section class="home-main">
+      <h1 class="home-title">欢迎使用 Blitz Camera NEXT</h1>
+      <div class="home-recent-head"><span>最近使用项</span><input id="homeFilter" placeholder="筛选" aria-label="筛选最近项目"></div>
+      <div class="home-table-wrap">
+        <table class="home-table">
+          <thead><tr><th class="sortable" id="homeSortName">名称 <span id="homeSortDir"></span></th><th>最近使用</th><th>回放</th><th>模式</th><th class="num">大小</th><th class="op"></th></tr></thead>
+          <tbody id="homeRows"></tbody>
+        </table>
+        <div class="home-empty" id="homeEmpty" hidden>暂无最近项目</div>
+      </div>
+    </section>
+  </main>
+
+  <main class="settings-page" id="settingsView" hidden aria-labelledby="settingsTitle">
+    <aside class="settings-side">
+      <h1 id="settingsTitle">设置</h1>
+      <span class="settings-nav"><svg class="ic"><use href="#i-folder"/></svg>项目与保存</span>
+      <button class="button secondary" id="settingsBack">返回工作台</button>
+    </aside>
+    <section class="settings-main">
+      <h2>应用设置</h2>
+      <p class="settings-subtitle">管理项目保存、全局快捷键和模式二的关键帧起始时间。</p>
+      <form id="settingsForm" class="settings-card">
+        <label class="settings-label" for="projectDirectory">默认项目文件夹</label>
+        <p class="settings-help" id="projectDirectoryHelp">新建项目和“另存为”默认使用此文件夹。</p>
+        <div class="settings-path-row">
+          <input id="projectDirectory" type="text" spellcheck="false" autocomplete="off" aria-describedby="projectDirectoryHelp" placeholder="选择文件夹，或输入完整路径">
+          <button class="button secondary" type="button" id="settingsBrowse"><svg class="ic"><use href="#i-folder"/></svg>选择文件夹</button>
+        </div>
+        <div class="settings-section">
+          <label class="settings-label" for="battleStartMode">模式二 · 赛前片段</label>
+          <p class="settings-help">比赛开始前可预览，不能新增或移入摄像机关键帧。已有关键帧保留。自动读取回放中的比赛开始事件；手动时填写从时间轴 0 秒起的赛前片段长度。</p>
+          <div class="settings-inline-row">
+            <select id="battleStartMode" aria-label="比赛开始时间来源"><option value="auto">自动读取回放</option><option value="manual">手动设置</option></select>
+            <label id="battleStartManual" hidden>赛前长度 <input id="battleStartSeconds" type="number" min="0" max="3600" step="0.001" value="0"> 秒</label>
+          </div>
+          <p class="settings-help" id="battleStartStatus" role="status"></p>
+        </div>
+        <div class="settings-save-row">
+          <button class="button secondary" type="button" id="settingsDefault">恢复默认</button>
+          <span class="settings-result" id="settingsResult" role="status" aria-live="polite"></span>
+          <button class="button settings-primary" type="submit" id="settingsSave" disabled>保存设置</button>
+        </div>
+      </form>
+      <section class="settings-card" aria-labelledby="hotkeyTitle">
+        <h3 id="hotkeyTitle">全局快捷键</h3>
+        <p class="settings-help">游戏中也可使用。记录当前游戏镜头的全部七项属性；模式一使用编辑器播放头时刻，模式二使用游戏当前暂停时刻。同一时刻已有点时会提示，不会直接替换。</p>
+        <div class="settings-inline-row">
+          <label>记录关键帧 Ctrl+Alt+<select id="globalCaptureKey"><option>F7</option><option selected>F8</option><option>F9</option><option>F10</option><option>F11</option><option>F12</option></select></label>
+          <label>悬浮窗显隐 Ctrl+Alt+<select id="globalHideKey"><option>F7</option><option>F8</option><option selected>F9</option><option>F10</option><option>F11</option><option>F12</option></select></label>
+          <button class="button secondary" id="applyGlobalKeys" type="button">应用快捷键</button>
+        </div>
+        <p class="settings-help" id="globalKeyStatus" role="status">全局快捷键需要桌面版工作台。</p>
+      </section>
+    </section>
+  </main>
+
+  <div class="modal-veil" id="draftGuard" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="draftGuardTitle">
+      <div class="modal-title" id="draftGuardTitle">未保存的更改</div>
+      <p class="modal-text">当前项目有未保存的草稿更改。切换项目前要保存吗？</p>
+      <div class="modal-btns">
+        <button class="button" id="draftSave">保存</button>
+        <button class="button secondary" id="draftDiscard">不保存</button>
+        <button class="button secondary" id="draftCancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <dialog class="modal project-delete-dialog" id="projectDeleteDialog" aria-labelledby="projectDeleteTitle" aria-describedby="projectDeleteText">
+    <form method="dialog">
+      <div class="modal-title" id="projectDeleteTitle">删除项目</div>
+      <div class="project-delete-name" id="projectDeleteName"></div>
+      <p class="project-delete-path" id="projectDeletePath"></p>
+      <p class="modal-text" id="projectDeleteText">项目文件将移到系统回收站，并从最近列表移除。回放文件会保留。</p>
+      <p class="modal-text" id="projectDeleteDraft" hidden>当前项目尚未保存的修改也会丢弃。</p>
+      <div class="modal-btns">
+        <button class="button secondary" value="cancel" autofocus>取消</button>
+        <button class="button danger" id="projectDeleteConfirm" value="delete">删除项目</button>
+      </div>
+    </form>
+  </dialog>
+
+  <main class="wb" id="wb">
+    <div class="wb-row wb-top">
+      <section class="panel connection-panel inspector">
+        <div class="tab-strip" role="tablist">
+          <button class="tab active" id="tabCamera" role="tab" aria-selected="true">镜头</button>
+          <button class="tab" id="tabSpeed" role="tab" aria-selected="false">速度</button>
+          <button class="tab" id="tabCurve" role="tab" aria-selected="false">关键帧</button>
+          <span class="tab-spacer"></span>
+        </div>
+        <div class="tab-pane" id="paneCamera" role="tabpanel">
+          <div class="prop-grid">
+            <span class="pk">状态</span><span class="pv"><i class="status-dot" data-conn-dot></i><span id="telemetryStatus">等待数据</span></span>
+            <span class="pk">对局时间</span><span class="pv num-lg"><span id="replayTime">—<small>s</small></span></span>
+            <span class="pk">回放</span><span class="pv"><span id="replayPaused" class="mode-pill">未读取</span><span id="replayRate" class="dim">— 倍速</span></span>
+            <span class="pk">X</span><span class="pv" id="cameraX">—</span>
+            <span class="pk">Y</span><span class="pv" id="cameraY">—</span>
+            <span class="pk">Z</span><span class="pv" id="cameraZ">—</span>
+            <span class="pk">水平角</span><span class="pv" id="cameraYaw">—</span>
+            <span class="pk">俯仰</span><span class="pv" id="cameraPitch">—</span>
+            <span class="pk">横滚</span><span class="pv" id="cameraRoll">—</span>
+            <span class="pk">缩放</span><span class="pv pv-cyan" id="cameraFov">—</span>
+          </div>
+          <div class="capture-row">
+            <label class="capture-time-label" for="captureTime">关键帧时间</label>
+            <div class="input-with-unit"><input type="number" id="captureTime" min="0" step="0.001" data-scrub-step="0.016667" value="0" inputmode="decimal"><span>s</span></div>
+            <div class="capture-btns">
+              <button class="ib cap" id="captureButton" disabled title="连接客户端并暂停本地回放后可用。" aria-label="记录全部属性关键帧"><svg class="ic"><use href="#i-key"/></svg><span>记录</span></button>
+              <label class="icon-toggle" title="允许替换同一时刻的属性关键帧"><input type="checkbox" id="replaceExisting" autocomplete="off"><svg class="ic"><use href="#i-replace"/></svg></label>
+              <button class="ib" id="newPathButton" disabled title="以当前属性新建动画" aria-label="以当前属性新建动画"><svg class="ic"><use href="#i-plus"/></svg></button>
+            </div>
+            <div class="session-line" id="sessionLine" hidden>会话 <span id="sessionId"></span></div>
+          </div>
+        </div>
+        <div class="tab-pane replay-speed-panel" id="paneSpeed" role="tabpanel" hidden>
+          <div class="speed-controls trajectory-settings">
+            <label id="fixedRateLabel">倍率 <select id="replayFixedRate"><option value="1">1×</option><option value="0.5">1/2×</option><option value="0.25" selected>1/4×</option><option value="0.125">1/8×</option><option value="0.0625">1/16×</option></select></label>
+            <select id="cameraClock" hidden aria-label="镜头时间"><option value="replay" selected>绑定对局时间</option></select>
+            <div class="seq-speed-curve-options"><label>过渡 <select id="timelineRateInterpolation"><option value="smooth">平滑</option><option value="linear">线性</option></select></label><button id="timelineSpeedPreset" title="正常 → 慢放 → 正常">预设</button></div>
+            <button class="ib" id="resetReplaySpeed" title="恢复固定 1×，清除中间速率关键帧" aria-label="恢复默认 1×"><svg class="ic"><use href="#i-refresh"/></svg></button>
+            <button class="ib" id="livePause" disabled title="暂停联动" aria-label="暂停联动"><svg class="ic"><use href="#i-pause"/></svg></button>
+          </div>
+          <div class="speed-edit-tools">
+            <span data-speed-range></span><span class="tab-spacer"></span>
+            <button class="ib" data-speed-action="undo" title="撤销 Ctrl+Z" aria-label="撤销速度编辑"><svg class="ic"><use href="#i-undo"/></svg></button>
+            <button class="ib" data-speed-action="redo" title="重做 Ctrl+Shift+Z" aria-label="重做速度编辑"><svg class="ic"><use href="#i-redo"/></svg></button>
+            <button class="ib" data-speed-action="add" title="在播放头添加速度点，保持原曲线" aria-label="添加速度点"><svg class="ic"><use href="#i-plus"/></svg></button>
+            <button class="ib" data-speed-action="delete" title="删除选中速度点 Delete；首尾点保留" aria-label="删除速度点"><svg class="ic"><use href="#i-close"/></svg></button>
+          </div>
+          <svg id="speedGraph" tabindex="0" role="group" aria-label="速度曲线编辑器；Ctrl 加点，拖动速度点和手柄" aria-describedby="speedEditHint"></svg>
+          <div class="speed-point-fields">
+            <span data-speed-selection>选择速度点</span>
+            <label>进度 <input data-speed-field="progress" type="number" min="0" max="100" step="0.1" aria-label="速度点拍摄进度">%</label>
+            <label>倍率 <input data-speed-field="rate" type="number" min="0.0625" max="1" step="0.01" aria-label="速度点倍率">×</label>
+            <label>分段 <select data-speed-field="segment" aria-label="速度点分段过渡"><option value="default">跟随过渡</option><option value="smooth">平滑</option><option value="linear">线性</option><option value="custom">贝塞尔</option></select></label>
+          </div>
+          <p class="speed-edit-hint" id="speedEditHint">Ctrl+左键 / 双击加点 · 拖动点或青色手柄 · Shift 锁定方向 · Alt 微调 · Ctrl+C / Ctrl+V 复制粘贴</p>
+          <div class="speed-readout" id="speedPreviewReadout">—</div>
+          <div id="speedCurveEditor" hidden>
+            <div class="button-row"><label>倍速过渡 <select id="speedInterpolation"><option value="smooth">平滑过渡</option><option value="linear">线性过渡</option></select></label><button class="button secondary" id="speedPreset">正常 → 慢放 → 正常</button><button class="button secondary" id="addSpeedFrame">＋ 速度关键帧</button></div>
+            <div class="table-scroll"><table class="speed-table"><thead><tr><th>拍摄进度 %</th><th>回放倍率 ×</th><th>操作</th></tr></thead><tbody id="speedRows"></tbody></table></div>
+          </div>
+        </div>
+        <div class="tab-pane" id="paneCurve" role="tabpanel" hidden title="">
+          <div class="kf-inspector" id="keyInspector">
+            <span class="kf-sel" data-selection>选择关键帧，或拖动标尺预演</span>
+            <div class="kf-fields">
+              <label><span data-time-label>时刻</span><input data-field="time" type="number" step="0.001" aria-label="选中关键帧对局时刻"></label>
+              <label><span data-value-label>数值</span><input data-field="value" type="number" step="0.001" aria-label="选中关键帧数值"></label>
+            </div>
+          </div>
+          <div class="curve-editor" id="curveEditor">
+            <div class="ce-head"><span class="kf-hd">镜头曲线</span><span class="ce-seg" id="curveSegmentInfo">选择相邻关键帧</span></div>
+            <div class="ce-main">
+              <div class="ce-graph"><svg id="easeGraph" viewBox="-6 -6 132 132" preserveAspectRatio="none" aria-label="分段缓动曲线编辑器"></svg></div>
+              <div class="ce-side">
+                <div class="ce-grid2">
+                  <label>x1<input id="easeX1" type="number" min="0" max="1" step="0.01" aria-label="缓动 x1"></label>
+                  <label>y1<input id="easeY1" type="number" min="0" max="1" step="0.01" aria-label="缓动 y1"></label>
+                  <label>x2<input id="easeX2" type="number" min="0" max="1" step="0.01" aria-label="缓动 x2"></label>
+                  <label>y2<input id="easeY2" type="number" min="0" max="1" step="0.01" aria-label="缓动 y2"></label>
+                </div>
+                <div class="ce-btns">
+                  <button class="ib" id="easeClear" title="恢复默认缓动" aria-label="恢复默认缓动"><svg class="ic"><use href="#i-refresh"/></svg></button>
+                  <button class="ib" id="presetSave" title="保存为预设" aria-label="保存为预设"><svg class="ic"><use href="#i-plus"/></svg></button>
+                </div>
+                <input id="presetName" placeholder="预设名" aria-label="预设名">
+                <label class="ce-join" title="应用模板时匹配相邻分段的速度；关闭后逐段独立缓动"><input id="easeContinuous" type="checkbox" checked>模板连续通过</label>
+              </div>
+            </div>
+            <div class="ce-hint" id="easeCurveInfo">实线：选中分段 · 虚线：模板</div>
+            <div class="ce-presets" id="easePresets"></div>
+          </div>
+          <div class="kf-defaults"><span class="kf-hd">默认</span><div class="def-row trajectory-settings">
+            <select id="timingSelect" title="时间分配"><option value="keyframes">遵守关键帧时间</option></select>
+            <select id="easingSelect" title="缓动"><option value="linear">匀速进度</option><option value="ease_in">缓入</option><option value="ease_out">缓出</option><option value="ease_in_out">缓入缓出</option></select>
+            <select id="interpolationSelect" title="路径形状"><option value="smooth">平滑曲线</option><option value="linear">直线分段</option></select>
+          </div></div>
+        </div>
+      </section>
+      <div class="vsplit" data-split="v" role="separator" aria-orientation="vertical" title="拖动调整宽度 · 双击重置"></div>
+      <section class="panel preview-panel">
+        <div class="preview-toolbar">
+          <div class="view-controls" role="group" aria-label="轨迹视图">
+            <button class="view-button active" data-view="3d" aria-pressed="true">3D</button>
+            <button class="view-button" data-view="xy" aria-pressed="false">XY</button>
+            <button class="view-button" data-view="xz" aria-pressed="false">XZ</button>
+            <button class="view-button" data-view="yz" aria-pressed="false">YZ</button>
+            <button class="ib" id="fitButton" title="适应轨迹范围" aria-label="适应轨迹范围"><svg class="ic"><use href="#i-fit"/></svg></button>
+          </div>
+          <div class="replay-preview-controls" id="replayPreviewControls" hidden>
+            <div class="seg">
+              <button class="view-button" id="previewObserver" aria-pressed="true">路径</button>
+              <button class="view-button" id="previewCamera" aria-pressed="false" title="实机镜头画面 16:9" aria-label="实机镜头画面 16:9" disabled>实机</button>
+            </div>
+            <button class="ib" id="previewFly" title="自由飞行 · WASD 移动，Q/E 升降，1–9 调速，鼠标转向，滚轮缩放，左键退出" aria-label="自由飞行" aria-pressed="false" hidden disabled><svg class="ic"><use href="#i-fly"/></svg></button>
+            <span class="override-pill" id="previewOverride" hidden>已调整<button class="ib" id="previewOverrideReset" title="恢复镜头轨迹姿态" aria-label="恢复镜头轨迹姿态"><svg class="ic"><use href="#i-reset"/></svg></button></span>
+            <button class="ib" id="previewFit" title="适应路径" aria-label="适应路径"><svg class="ic"><use href="#i-fit"/></svg></button>
+            <button class="ib" id="previewRecord" disabled title="将当前镜头的七项属性记录到播放头" aria-label="记录预览镜头"><svg class="ic"><use href="#i-record"/></svg></button>
+            <button class="ib" id="loadPreviewReplay" title="载入回放预览" aria-label="载入回放预览"><svg class="ic"><use href="#i-folder"/></svg></button>
+            <button class="ib" id="retryPreview" title="重新载入" aria-label="重新载入"><svg class="ic"><use href="#i-refresh"/></svg></button>
+            <span id="previewFile">未选择回放</span>
+            <details class="preview-alignment"><summary title="预览时间微调（已自动对齐回放时钟）" aria-label="预览时间微调"><svg class="ic"><use href="#i-clock"/></svg></summary><label>微调 <input type="number" id="previewOffset" step="0.001" data-scrub-step="0.01" min="-600" max="600" value="0"> s</label></details>
+          </div>
+        </div>
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="pathCanvas" aria-label="网格上的离线摄像机轨迹预览；可拖动三维视图，滚轮缩放"></canvas>
+          <div class="canvas-empty" id="canvasEmpty"><svg class="ic"><use href="#i-path"/></svg><p>记录属性关键帧，或导入轨迹。</p></div>
+          <div id="replayScene" hidden><div id="previewEmpty" role="button" tabindex="0" title="载入回放预览"><svg class="ic"><use href="#i-folder"/></svg><span data-label>载入回放</span><div class="pe-progress" data-progress hidden><i></i></div><span class="pe-msg" data-msg></span></div><div class="preview-scene-hud"><span id="previewMap"></span><span id="previewSceneTime"></span></div><div class="preview-flight-hud" id="previewFlightHud" hidden><i class="flight-reticle"></i><span>WASD 移动 · Q/E 升降 · 1–9 调速 · 滚轮缩放</span><span><b id="previewFlightSpeed">4 档</b> · 左键 / Esc 退出</span></div></div>
+          <span class="draft-note" id="draftPreviewNote" hidden>草稿未保存 · 预演当前草稿</span>
+        </div>
+        <div class="transport">
+          <output class="tc tc-cur" id="timelineCurrent" for="timelineSlider">0.000</output>
+          <span id="timelineStart" hidden>0.000 s</span>
+          <input type="range" id="timelineSlider" min="0" max="1" value="0" step="0.001" disabled aria-label="离线预演时间">
+          <span class="tc" id="timelineEnd">0.000</span>
+          <div class="tp-controls">
+            <button class="ib" id="loopButton" title="循环预演" aria-label="循环预演" aria-pressed="false"><svg class="ic"><use href="#i-loop"/></svg></button>
+            <button class="ib play" id="playButton" aria-label="播放离线预演" title="播放离线预演" disabled><svg class="ic"><use href="#i-play"/></svg></button>
+            <select id="previewSpeed" aria-label="离线预演速度" title="预演速度"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+          </div>
+          <div class="live-group" id="liveControls" title="">
+            <svg class="ic lg-ic" title="游戏内运镜"><use href="#i-target"/></svg>
+            <button class="ib" id="liveSeekStart" data-action="locate" disabled title="实验性跳转到工作区入点 · 游戏需暂停；可能导致客户端崩溃" aria-label="实验性跳转到工作区入点"><svg class="ic"><use href="#i-locate-start"/></svg></button>
+            <button class="ib" id="liveReverse" disabled title="倒序播放"><svg class="ic"><use href="#i-reverse"/></svg></button>
+            <button class="ib" id="liveStop" disabled title="停止"><svg class="ic"><use href="#i-stop"/></svg></button>
+            <button class="ib pri" id="liveForward" disabled title="播放至出点" aria-label="播放至出点"><svg class="ic"><use href="#i-play"/></svg></button>
+            <progress id="liveProgress" max="1" value="0" aria-label="游戏内运镜进度"></progress>
+            <span class="tc" id="liveElapsed">0.00 s</span>
+            <span class="mode-pill" id="liveBadge">手动控制</span>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="hsplit" data-split="h" role="separator" aria-orientation="horizontal" title="拖动调整高度 · 双击重置"></div>
+    <div class="wb-row wb-bottom">
+      <section class="panel panel-project">
+        <div class="panel-head">项目</div>
+        <dl class="kv">
+          <div><dt>关键帧</dt><dd id="keyframeCount">0</dd></div>
+          <div><dt>保存状态</dt><dd><span class="saved-label" id="savedLabel">已保存</span></dd></div>
+          <div><dt>回放文件</dt><dd class="replay-file" id="openedReplayFile" title="">—</dd></div>
+          <div><dt>预览源</dt><dd id="previewSourceFile">—</dd></div>
+          <div><dt>路径长度</dt><dd id="pathLength">—</dd></div>
+          <div><dt>时长 / s</dt><dd id="pathDuration">—</dd></div>
+          <div><dt>采样</dt><dd><span id="sampleCount">—</span> <span class="sampling-indicator" id="samplingIndicator">等待轨迹</span></dd></div>
+        </dl>
+        <details class="sequence-settings" id="replaySourceSettings"><summary>回放来源与全片长度</summary><div class="seq-source-controls"><input id="replayFilePath" aria-label="回放文件完整路径" placeholder=".wotbreplay 完整路径"><button id="readReplayFile">读取长度</button><button id="useCurrentReplay">用启动回放</button></div></details>
+      </section>
+      <div class="vsplit" data-split="v" role="separator" aria-orientation="vertical" title="拖动调整宽度 · 双击重置"></div>
+      <section class="panel sequence-panel" aria-labelledby="sequenceTitle">
+        <div id="sequenceEditor" aria-label="摄像机属性时间轴"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="statusbar">
+    <span class="status-dot" id="connectionDot"></span>
+    <span class="sb-conn" id="connectionLabel">尚未连接</span>
+    <span class="sb-msg" id="connectionMessage" role="status">正在读取本地服务状态…</span>
+    <span class="sb-msg" id="replayLaunchMessage" role="status"></span>
+    <span class="sb-msg" id="liveMessage" role="status" aria-live="polite"></span>
+    <span class="sb-msg" id="previewStatus" role="status"></span>
+    <span class="sb-spacer"></span>
+    <span class="sb-banner warn" id="externalChange" hidden><span>服务端项目已更新</span><button class="ib" id="reloadProjectButton" title="载入服务端项目" aria-label="载入服务端项目"><svg class="ic"><use href="#i-refresh"/></svg></button></span>
+    <span class="sb-banner err" id="serviceError" role="alert" hidden></span>
+  </footer>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

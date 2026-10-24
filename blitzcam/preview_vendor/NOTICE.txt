@@ -1,0 +1,52 @@
+Blitz Camera offline replay preview — third-party notices (2026-10-22)
+
+WoT-Blitz-Agent browser replay parser v0.4.11
+https://github.com/fanypcd/WoT-Blitz-Agent
+Pinned parser commit: 0a9da93a0074a95af406db3468e6a81a5a6b139f
+Browser WASM/JS and fingerprint live in web/vendor/agent.
+Release ZIP SHA-256:
+8170ba26b289e1952ed04d92f572a596a0503c988b86316c008b57a3fbec96f6
+
+WoT-Blitz-Agent asset exporters / metadata source v0.4.9
+https://github.com/A158Coke/WoT-Blitz-Agent
+Pinned commit: 8dcec2c6463f23116871157ef6d64985875efd67
+MIT code license: Agent-LICENSE.
+Vendored map/tank exporters and selected format readers are retained with their
+copyright notices. Asset exporter/metadata source is unchanged by the parser upgrade.
+Original v0.4.9 release ZIP SHA-256:
+b77dbcc495abb27c29b9d5a93f858e5f3b7dd8e48b6c6637d4b397b221e09758
+
+WotbTools
+https://github.com/A158Coke/WotbTools
+Pinned commit: 11d0d519aba2afedcae3d49365b0bfd1a4b5c76d
+MIT: web/vendor/wotbtools/LICENSE and wotbtools/LICENSE.
+Selected reconstruction, visibility/identity, terrain, material, rig, life-state
+and battle-effect modules are adapted to local ES-module imports. battleFx.js,
+shotPath.js, impactKind.js and tankDestroyedVisual.js retain the upstream
+procedural effects and wreck materials. The local replay-effects adapter drives
+their lifetimes with replay time to support paused frames and backward seeking.
+TypeScript modules are transpiled with TypeScript 5.9.3 to ES2020; see
+tools/transpile_preview_vendor.cjs. Source hashes are recorded in provenance.json.
+
+Three.js 0.185.1
+https://github.com/mrdoob/three.js
+MIT: web/vendor/three/LICENSE. Local imports replace bare package imports.
+
+Local asset conversion dependencies
+NumPy 2.4.6; Pillow 12.3.0; imagecodecs 2025.8.2 (BCn decoder).
+https://numpy.org/  https://python-pillow.org/  https://github.com/cgohlke/imagecodecs
+Their copyright/license files are included under the portable package licenses
+directory and app/blitzcam/preview_runtime. Exact imagecodecs wheel SHA-256 and
+URL are recorded in preview_runtime/imagecodecs-provenance.json. The desktop
+package manifest records hashes for every shipped application/dependency file.
+
+Game-derived metadata: data/tanks.pb and data/models.pb come from the pinned
+Agent source data. They are not granted an MIT license by this application's
+code notices. World of Tanks Blitz names and game content belong to their
+respective rights holders. Local game geometry, maps and textures are read from
+the user's installed Steam international client, converted into the user's
+output cache, and are NOT included in the portable distribution.
+
+This is a private local preview integration, not an official SDK or permission
+from the game operator. Public redistribution of game-derived metadata or cache
+requires separate rights review. No network asset service is used at runtime.

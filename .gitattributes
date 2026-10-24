@@ -1,0 +1,17 @@
+# Keep source diffs consistent across Windows and other development machines.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.wasm binary
+*.dll binary
+*.pb binary
+
+# Preserve upstream bytes used by vendored provenance hashes.
+/blitzcam/web/vendor/** -text
+/blitzcam/preview_vendor/** -text

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "quaternion_order": "wxyz",
+  "fov_axis": "horizontal",
+  "timing": "keyframes",
+  "easing": "ease_in_out",
+  "position_interpolation": "smooth",
+  "arc_tolerance": 1e-06,
+  "keyframes": [
+    {
+      "time_sec": 0.0,
+      "position": [
+        -71.52263641357422,
+        232.59115600585938,
+        36.746612548828125
+      ],
+      "quaternion": [
+        0.20770125994645852,
+        0.19473147926368636,
+        0.6556559179647671,
+        0.6993247849448844
+      ],
+      "horizontal_fov_deg": 68.41167535035929
+    },
+    {
+      "time_sec": 4.0,
+      "position": [
+        -78.24463653564453,
+        222.27294921875,
+        44.0
+      ],
+      "quaternion": [
+        0.12667928823516925,
+        0.0,
+        0.6839627370140993,
+        0.7184339442902271
+      ],
+      "horizontal_fov_deg": 72.0
+    },
+    {
+      "time_sec": 8.0,
+      "position": [
+        -68.0,
+        212.0,
+        41.0
+      ],
+      "quaternion": [
+        0.1888128793276561,
+        0.17702258247969574,
+        -0.6606572719012764,
+        -0.7046592587741837
+      ],
+      "horizontal_fov_deg": 80.0
+    }
+  ]
+}

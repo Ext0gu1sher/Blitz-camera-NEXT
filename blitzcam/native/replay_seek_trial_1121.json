@@ -1,0 +1,8 @@
+{
+  "config_size": 100,
+  "header_size": 56,
+  "header_offset": 100,
+  "shared_size": 156,
+  "sha256": "43fae9ec8448da2f251de58ff8e3a0b1d6528d8fd222c9964bc4f91bdbfffe14",
+  "dll": "replay_seek_trial_1121.43fae9ec8448.dll"
+}
