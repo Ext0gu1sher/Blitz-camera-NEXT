@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from blitzcam import replay_seek as seek
 from blitzcam.playback import PositionPlayback
-from blitzcam.profile import CameraError, PROFILE_1121
+from blitzcam.profile import CameraError, PROFILE_1121, SessionChanged
 from blitzcam.project import atomic_json
 from blitzcam.server import Workstation
 from blitzcam.seek_phase_trial import Config, Header, UiRepairState
@@ -38,6 +38,8 @@ class SeekWorkerTests(unittest.TestCase):
         self.connect=patch.object(seek.CameraSession,'connect',side_effect=[self.old,self.fresh]).start()
         self.native=patch.object(seek,'native_seek',side_effect=self.land).start()
         self.ensure=patch.object(seek,'ensure_free_camera',return_value=True).start()
+        # Test the handoff separately from the observer's real thread/lifetime.
+        self.watch=patch.object(seek,'start_exit_watch',side_effect=lambda manager,reader,*_:reader.close()).start()
         self.addCleanup(patch.stopall)
         self.adopt=Mock(return_value=True);self.invalidate=Mock(return_value=True)
         self.reopen=Mock(return_value=True)
@@ -101,6 +103,27 @@ class SeekWorkerTests(unittest.TestCase):
         self.reopen.assert_called_once_with();self.assertTrue(self.manager.state()['replay_relaunch_requested'])
         self.assertTrue(self.manager.state()['hooks_detached'])
         self.assertEqual(self.connect.call_count,1);self.old.close.assert_called_once()
+        self.watch.assert_not_called()
+
+    def test_error_before_process_exit_hands_original_handle_to_background_observer(self):
+        self.bind_replay();self.native.side_effect=CameraError('native fault while process still active')
+        self.run_seek()
+        self.watch.assert_called_once()
+        self.assertEqual(self.watch.call_args.args[:3],(self.manager,self.old,self.manager.cancel))
+        self.assertTrue(self.manager.state()['replay_recovery_pending'])
+        self.assertFalse(self.manager.state().get('preparing_replay'))
+        self.assertEqual(self.manager.state()['state'],'error')
+        self.reopen.assert_not_called();self.ensure.assert_not_called();self.adopt.assert_not_called()
+
+    def test_completed_native_seek_also_watches_for_delayed_exit(self):
+        self.bind_replay();self.run_seek()
+        self.watch.assert_called_once()
+        self.assertIs(self.watch.call_args.args[1],self.old)
+        self.adopt.assert_called_once_with(self.fresh,snapshot(10.08))
+        self.fresh.close.assert_not_called()
+        self.assertTrue(self.manager.state()['replay_recovery_pending'])
+        self.assertEqual(self.manager.state()['state'],'completed')
+        self.reopen.assert_not_called()
 
     def test_confirmed_exit_during_camera_switch_relaunches_without_binding_or_pose(self):
         self.bind_replay();self.old.memory.exit_code.return_value=1
@@ -194,15 +217,137 @@ class SeekWorkerTests(unittest.TestCase):
                 reopen=start.call_args.args[-1]
             with patch.object(w,'open_replay',return_value=True) as launch:
                 self.assertTrue(reopen())
+                self.assertIsNone(w.session);self.assertIsNone(w.sample)
                 self.assertEqual(launch.call_args.args,('A.wotbreplay',))
                 guard=launch.call_args.kwargs['recovery_guard']
             self.assertTrue(guard())
+            original_cancel=w.playback.cancel;w.playback.cancel=threading.Event()
+            self.assertFalse(guard());self.assertFalse(reopen())
+            w.playback.cancel=original_cancel
             w.project_revision+=1;self.assertFalse(guard())
             self.assertFalse(reopen())  # Real opener rejects before starting a worker.
             w.project_revision-=1;w.playback.cancel.set();self.assertFalse(guard())
             w.playback.cancel.clear();w.generation+=1;self.assertFalse(guard())
             self.assertFalse(reopen())
         finally:w.close()
+
+    def test_polling_changed_scene_does_not_cancel_pending_exit_observer(self):
+        w=Workstation(Path(self.tmp.name)/'project.json');w.stop.set();w.poller.join();w.stop.clear()
+        w.session=self.old;w.sample=snapshot(20)
+        self.old.capture.side_effect=SessionChanged('old scene was destroyed')
+        w.playback.update(state='completed',active=False,replay_recovery_pending=True)
+        generation=w.generation
+        try:
+            with patch.object(w.stop,'wait',side_effect=[False,True]):w._poll()
+            self.assertEqual(w.generation,generation)
+            self.assertFalse(w.playback.cancel.is_set())
+            self.assertIs(w.session,self.old);self.assertIsNone(w.sample)
+        finally:w.close()
+
+
+class DelayedExitTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.folder=Path(self.tmp.name)
+        self.manager=PositionPlayback(self.folder/'playback-runs')
+        self.manager.update(state='completed',active=False,replay_recovery_pending=True)
+        self.cancel=self.manager.cancel
+        self.reader=Mock();self.reader.memory.exit_code.return_value=None
+        self.reopen=Mock(return_value=True)
+        self.report={'hooks_detached':True,'exit_watch':'pending'}
+        self.addCleanup(patch.stopall)
+        patch.object(seek,'EXIT_WATCH_SECONDS',.02).start()
+        patch.object(seek,'EXIT_POLL_SECONDS',.001).start()
+
+    def watch(self):
+        seek.watch_exit(self.manager,self.reader,self.cancel,self.reopen,self.report,self.folder)
+        self.reader.close.assert_called_once()
+        self.assertFalse(self.manager.state().get('replay_recovery_pending'))
+        saved=json.loads((self.folder/'report.json').read_text(encoding='utf8'))
+        self.assertEqual(saved['exit_watch'],self.report['exit_watch'])
+
+    def test_process_still_active_then_exits_reopens_once_after_reader_closes(self):
+        self.reader.memory.exit_code.side_effect=[None,None,0xc0000005]
+        def reopen():
+            self.reader.close.assert_called_once()
+            self.assertTrue(self.manager.state()['replay_recovery_pending'])
+            return True
+        self.reopen.side_effect=reopen
+        self.watch()
+        self.reopen.assert_called_once()
+        self.assertTrue(self.manager.state()['replay_relaunch_requested'])
+        self.assertEqual(self.report['process_exit_code'],0xc0000005)
+        self.assertEqual(self.report['exit_watch'],'confirmed_exit')
+        self.reader.capture.assert_not_called()
+
+    def test_no_confirmed_exit_expires_without_launching(self):
+        self.watch();self.reopen.assert_not_called()
+        self.assertEqual(self.report['exit_watch'],'expired_without_confirmed_exit')
+        self.assertEqual(self.manager.state()['state'],'completed')
+
+    def test_unknown_exit_query_never_launches(self):
+        self.reader.memory.exit_code.side_effect=OSError('query unavailable')
+        self.watch();self.reopen.assert_not_called()
+        self.assertNotIn('process_exit_code',self.report)
+
+    def test_stop_cancels_late_recovery(self):
+        def query():self.cancel.set();return None
+        self.reader.memory.exit_code.side_effect=query
+        self.watch();self.reopen.assert_not_called()
+        self.assertEqual(self.report['exit_watch'],'cancelled_or_superseded')
+
+    def test_exit_racing_with_stop_does_not_launch(self):
+        def query():self.cancel.set();return 1
+        self.reader.memory.exit_code.side_effect=query
+        self.watch();self.reopen.assert_not_called()
+        self.assertEqual(self.report['relaunch_skipped'],'cancelled_or_superseded')
+
+    def test_new_operation_is_not_overwritten_or_cancelled(self):
+        def query():
+            self.manager.cancel=threading.Event()
+            self.manager.value={'state':'playing','active':True,'message':'new playback'}
+            return 1
+        self.reader.memory.exit_code.side_effect=query
+        self.watch();self.reopen.assert_not_called()
+        self.assertEqual(self.manager.value,{'state':'playing','active':True,'message':'new playback'})
+        self.assertFalse(self.manager.cancel.is_set())
+
+    def test_asynchronous_opener_can_disconnect_after_accepting_request(self):
+        self.reader.memory.exit_code.return_value=0
+        def reopen():self.cancel.set();return True
+        self.reopen.side_effect=reopen
+        self.watch();self.reopen.assert_called_once()
+        self.assertEqual(self.manager.state()['state'],'stopped')
+        self.assertTrue(self.manager.state()['replay_relaunch_requested'])
+
+    def test_rejected_recovery_guard_does_not_report_launch_success(self):
+        self.reader.memory.exit_code.return_value=1;self.reopen.return_value=False
+        self.watch();self.reopen.assert_called_once()
+        self.assertFalse(self.report['relaunch_requested'])
+        self.assertNotIn('replay_relaunch_requested',self.manager.state())
+
+    def test_launch_failure_is_recorded(self):
+        self.reader.memory.exit_code.return_value=1;self.reopen.side_effect=CameraError('launcher unavailable')
+        self.watch();self.reopen.assert_called_once()
+        self.assertEqual(self.report['relaunch_error'],'launcher unavailable')
+        self.assertEqual(self.manager.state()['state'],'error')
+
+    def test_observer_runs_in_background_and_releases_handle_on_new_operation(self):
+        entered=threading.Event()
+        def query():entered.set();return None
+        self.reader.memory.exit_code.side_effect=query
+        with patch.object(seek,'EXIT_WATCH_SECONDS',30):
+            worker=seek.start_exit_watch(self.manager,self.reader,self.cancel,self.reopen,self.report,self.folder)
+            try:
+                self.assertTrue(entered.wait(1));self.assertTrue(worker.is_alive())
+                with self.manager.lock:
+                    self.manager.cancel=threading.Event()
+                    self.manager.value={'state':'playing','active':True}
+            finally:
+                self.cancel.set();worker.join(timeout=1)
+        self.assertFalse(worker.is_alive());self.reader.close.assert_called_once()
+        self.reopen.assert_not_called()
+        self.assertEqual(self.manager.value,{'state':'playing','active':True})
 
 
 class NativeSeekSupervisorTests(unittest.TestCase):

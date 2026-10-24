@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import threading
 import time
 
 from .hook_layout import plain
@@ -25,6 +26,83 @@ from .seek_phase_trial import Config, Header, UiRepairState, prepare
 from .seek_trial import clock, settled
 
 NATIVE = Path(__file__).parent/'native'
+EXIT_WATCH_SECONDS = 30.
+EXIT_POLL_SECONDS = .1
+
+
+def relaunch_after_exit(manager, cancel, reopen_replay, report, folder, code):
+    """The original handle has confirmed exit and all owned readers are closed."""
+    report.update(process_exit_code=code, hooks_detached=True)
+    with manager.lock:
+        if manager.cancel is not cancel or cancel.is_set():
+            report['relaunch_skipped'] = 'cancelled_or_superseded'
+        else:
+            manager.value.update(hooks_detached=True)
+    if not report.get('relaunch_skipped'):
+        report['relaunch_attempted'] = True
+        try:
+            requested = bool(reopen_replay())
+            report['relaunch_requested'] = requested
+            with manager.lock:
+                # Opening the replay can set this event through disconnect().
+                # A replacement event, however, belongs to a newer operation.
+                if requested and manager.cancel is cancel:
+                    manager.value.update(state='stopped', active=False, hooks_detached=True,
+                        replay_relaunch_requested=True,
+                        message='游戏已退出，已重新请求启动项目回放。载入后再连接；未继续跳转或恢复镜头。')
+        except Exception as exc:
+            report['relaunch_error'] = str(exc)
+            with manager.lock:
+                if manager.cancel is cancel:
+                    manager.value.update(state='error', message=f'游戏已退出，重新启动回放失败：{exc}')
+    with manager.lock:
+        if manager.cancel is cancel:
+            manager.value['replay_recovery_pending'] = False
+    report['result'] = manager.state()
+    atomic_json(folder/'report.json', report)
+
+
+def watch_exit(manager, reader, cancel, reopen_replay, report, folder):
+    """Observe only the original process handle, including delayed crash teardown.
+
+    No camera reads or remote calls run here. Keep this off the playback worker
+    so a successful seek does not delay the next user action.
+    """
+    code = None
+    try:
+        deadline = time.monotonic()+EXIT_WATCH_SECONDS
+        while True:
+            with manager.lock:
+                current = manager.cancel is cancel and not cancel.is_set()
+            if not current:
+                report['exit_watch'] = 'cancelled_or_superseded'
+                break
+            code = confirmed_exit_code(reader.memory)
+            if code is not None:
+                report['exit_watch'] = 'confirmed_exit'
+                break
+            remaining = deadline-time.monotonic()
+            if remaining <= 0:
+                report['exit_watch'] = 'expired_without_confirmed_exit'
+                break
+            cancel.wait(min(EXIT_POLL_SECONDS, remaining))
+    finally:
+        reader.close()
+        with manager.lock:
+            if code is None and manager.cancel is cancel:
+                manager.value['replay_recovery_pending'] = False
+    if code is not None:
+        relaunch_after_exit(manager, cancel, reopen_replay, report, folder, code)
+    else:
+        report['result'] = manager.state()
+        atomic_json(folder/'report.json', report)
+
+
+def start_exit_watch(manager, reader, cancel, reopen_replay, report, folder):
+    worker = threading.Thread(target=watch_exit,
+        args=(manager, reader, cancel, reopen_replay, report, folder), daemon=True)
+    worker.start()
+    return worker
 
 
 def native_seek(session, snapshot, target, folder, cancel, report):
@@ -110,6 +188,7 @@ def native_seek(session, snapshot, target, folder, cancel, report):
 
 
 def seek_replay(manager, project, reference, adopt_session, invalidate_session, reopen_replay=None):
+    cancel = manager.cancel
     target = project.replay_timeline['work_start_sec']
     folder = (manager.output.parent/'replay-seek-phase-runs'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')).resolve()
     report = dict(experimental_seek=True, target_time=target, hooks_detached=True,
@@ -186,27 +265,31 @@ def seek_replay(manager, project, reference, adopt_session, invalidate_session, 
         manager.update(state='error', message=str(exc), hooks_detached=report['hooks_detached'] and (not restoring or manager.value.get('hooks_detached', True)))
         if crashed:manager.update(hooks_detached=True)
     finally:
+        # An exception/read failure can precede GetExitCodeProcess changing from
+        # STILL_ACTIVE. A successful clock/camera handshake can precede a crash
+        # too. Preserve our original reader for a bounded exit-only observer.
+        watched = session if (session is not None and game_operation and not crashed and bound and
+                              reopen_replay is not None and not cancel.is_set()) else None
         for reader in (fresh, session):
-            if reader is not None:reader.close()
+            if reader is not None and reader is not watched:reader.close()
         with manager.lock:
             manager.preparation = None
             manager.value['active'] = False
+            manager.value['run_path'] = str(folder)
+            manager.value['replay_recovery_pending'] = watched is not None
             if manager.cancel.is_set() and manager.value.get('state') != 'error':
                 manager.value.update(state='stopped', message='已停止跳转；已执行的游戏跳转不会回退。')
+        if watched is not None:
+            report.update(exit_watch='pending', exit_watch_seconds=EXIT_WATCH_SECONDS)
         report['result'] = manager.state()
-        if folder.exists():atomic_json(folder/'report.json', report)
+        try:
+            if folder.exists():atomic_json(folder/'report.json', report)
+            if watched is not None:
+                start_exit_watch(manager, watched, cancel, reopen_replay, report, folder)
+        except Exception:
+            if watched is not None:watched.close()
+            raise
     # Only a confirmed exit of the original handle permits one launch. Stop
     # all camera work first; do not seek again after opening the bound replay.
-    if crashed and bound and reopen_replay is not None and not manager.cancel.is_set():
-        report['relaunch_attempted'] = True
-        try:
-            requested = bool(reopen_replay())
-            report['relaunch_requested'] = requested
-            if requested:
-                manager.update(state='stopped', active=False, hooks_detached=True, replay_relaunch_requested=True,
-                               message='游戏已退出，已重新请求启动项目回放。载入后再连接；未继续跳转或恢复镜头。')
-        except Exception as exc:
-            report['relaunch_error'] = str(exc)
-            manager.update(state='error', message=f'游戏已退出，重新启动回放失败：{exc}')
-        report['result'] = manager.state()
-        atomic_json(folder/'report.json', report)
+    if crashed and bound and reopen_replay is not None:
+        relaunch_after_exit(manager, cancel, reopen_replay, report, folder, code)

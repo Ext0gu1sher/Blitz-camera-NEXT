@@ -331,6 +331,13 @@ class Workstation:
                     if self.connection.get('source_warning'):
                         self.connection['message'] += '；' + self.connection['source_warning']
                 except SessionChanged as exc:
+                    if self.playback.state().get('replay_recovery_pending'):
+                        # Leave the seek's exit-only observer alive while Windows
+                        # finishes tearing down a crashing process. An explicit
+                        # reconnect/disconnect still cancels that observer.
+                        self.sample = None
+                        self.connection.update(state='error', message=str(exc))
+                        continue
                     self.disconnect()
                     if self.replay_launch.get('info'):
                         self.replay_launch.update(verified=False, state='invalidated',
@@ -668,12 +675,20 @@ class Workstation:
                 if mode=='locate':
                     revision=self.project_revision
                     bound=self.project.replay_timeline.get('replay_file')
+                    seek_cancel=None
                     def recovery_guard():
-                        return (not self.stop.is_set() and not self.playback.cancel.is_set() and
+                        return (not self.stop.is_set() and self.playback.cancel is seek_cancel and
+                                not seek_cancel.is_set() and
                                 generation==self.generation and revision==self.project_revision and
                                 bound and self.project.replay_timeline.get('replay_file')==bound)
                     def reopen_replay():
-                        return self.open_replay(bound,recovery_guard=recovery_guard) if bound else False
+                        with self.lock:
+                            if not recovery_guard():return False
+                            # The successful seek may already have adopted a new
+                            # reader of this same process. Retire it before the
+                            # asynchronous launcher yields to the normal poller.
+                            if not invalidate_session():return False
+                            return self.open_replay(bound,recovery_guard=recovery_guard)
                     def invalidate_session():
                         while not self.playback.cancel.is_set():
                             if not self.lock.acquire(timeout=.1):continue
@@ -686,6 +701,7 @@ class Workstation:
                             finally:self.lock.release()
                         return False
                     self.playback.seek(self.project,reference,adopt_session,invalidate_session,reopen_replay)
+                    seek_cancel=self.playback.cancel
                 else:
                     self.playback.prepare(self.project,reference,False,adopt_session,orientation_enabled,fov_enabled)
                 return
