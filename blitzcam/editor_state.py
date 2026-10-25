@@ -17,7 +17,7 @@ def validate_editor_state(value):
     if len(text.encode('utf-8')) > 32768:
         raise ValueError('编辑器状态过大。')
     # Only view data belongs here. Project edits use the normal revision guard.
-    return {key: value[key] for key in ('schema_version', 'saved_at', 'timeline', 'path_view', 'preview', 'inspector', 'splits') if key in value}
+    return {key: value[key] for key in ('schema_version', 'saved_at', 'timeline', 'path_view', 'preview', 'inspector', 'workspace_tab', 'splits') if key in value}
 
 
 def editor_state_path(output, project_path):

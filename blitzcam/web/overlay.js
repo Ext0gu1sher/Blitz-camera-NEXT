@@ -3,6 +3,7 @@ const $=id=>document.getElementById(id);
 const native=!!window.chrome?.webview;
 const panel=new URLSearchParams(location.search).get("panel")||"all";
 const model={data:null,busy:false,polling:false,ready:false,projectHash:"",durationEdited:false,previewReady:false,previewLoading:false,previewSequence:0};
+const CAMERA_COLORS=['#d6ec96','#8fd3d8','#eba89c','#c4a7e8','#ecc17c','#92cb96','#90b6e6','#e89cc2','#b9d873','#79d0b2','#e98780','#9db9ef','#e3d488','#8fd4a8','#d2a0ec','#f0a97d'];
 let toastTimer,workbenchTimer;
 document.querySelectorAll("[data-panel]").forEach(el=>el.hidden=panel!=="all"&&el.dataset.panel!==panel);
 if(!native){
@@ -101,7 +102,16 @@ function render(){
   $("miniLiveStatus").classList.toggle("error",live.state==="error");
   if(live.active&&model.previewReady){preview.pause();preview.setProgress(live.reverse?1-(live.progress||0):live.progress||0);}
   renderSpeed();
-  $("attributeSummary").textContent=`${Object.values(d.camera_track_controls||{}).flat().length} 个属性关键帧`;buttons();sendSummary();
+  $("attributeSummary").textContent=`${Object.values(d.camera_track_controls||{}).flat().length} 个属性关键帧`;
+  const cameras=d.project?.multicam?.cameras||[],ai=cameras.findIndex(c=>c.id===d.project?.multicam?.active_camera_id),cam=cameras[ai];
+  const badge=$("cameraBadge");
+  badge.hidden=cameras.length<2||!cam;
+  if(cam){
+    const slot=Number.isInteger(cam.slot)&&cam.slot>=0&&cam.slot<16?cam.slot:Math.max(0,ai);
+    const dot=document.createElement('i');dot.className='camera-dot';dot.style.background=CAMERA_COLORS[slot%CAMERA_COLORS.length];
+    badge.replaceChildren(dot,document.createTextNode(String.fromCharCode(65+slot)+' '+cam.name));badge.title=cam.name;
+  }
+  buttons();sendSummary();
 }
 async function loadPreview(hash){
   if(panel!=="all"&&panel!=="keyframes")return;

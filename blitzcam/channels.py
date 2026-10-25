@@ -77,8 +77,9 @@ def _bezier_slope(ctrl, end=False):
 
 class ScalarTrack:
     def __init__(self, rows, name, smooth, easing):
-        if not isinstance(rows, list) or not 1 <= len(rows) <= 200:
-            raise ValueError('每条摄像机轨道需要 1–200 个关键帧。')
+        if not isinstance(rows, list) or not 0 <= len(rows) <= 200:
+            raise ValueError('每条摄像机轨道最多 200 个关键帧。')
+        self.default = 60.0 if name == 'zoom' else 0.0
         self.rows = []
         for row in rows:
             if not isinstance(row, dict) or not {'time_sec','value'} <= set(row) <= {'time_sec','value','ease','curve'}:
@@ -105,7 +106,7 @@ class ScalarTrack:
         if any(b-a < 1e-5 for a,b in zip(self.times,self.times[1:])):
             raise ValueError('同一参数的关键帧必须按时间递增，间隔至少 0.00001 秒。')
         self.smooth, self.easing = smooth, easing
-        self.tangents = self._monotone_tangents() if smooth or any(r.get('curve') == 'auto' for r in self.rows) else []
+        self.tangents = self._monotone_tangents() if self.rows and (smooth or any(r.get('curve') == 'auto' for r in self.rows)) else []
         self.auto_curves = self._automatic_curves()
         self.smooth_curves = smooth_camera_curves(self.rows, self.auto_curves)
 
@@ -188,6 +189,7 @@ class ScalarTrack:
         return result
 
     def sample(self, time):
+        if not self.rows: return self.default
         if time <= self.times[0]: return self.rows[0]['value']
         if time >= self.times[-1]: return self.rows[-1]['value']
         i = bisect_right(self.times, time)-1
@@ -218,7 +220,7 @@ class ChannelTrajectory(Trajectory):
         Trajectory([Keyframe(0,Pose((0,0,0),(1,0,0,0),60))], **settings)
         children = {name: ScalarTrack(tracks[name], name, name in ('x','y','z') and settings['position_interpolation']=='smooth', settings['easing']) for name in CHANNELS}
         times = sorted({t for child in children.values() for t in child.times})
-        if len(times) > 200 or (data.get('shooting_mode') != 'camera_only' and times[-1]-times[0] > 3600):
+        if len(times) > 200 or (times and data.get('shooting_mode') != 'camera_only' and times[-1]-times[0] > 3600):
             raise ValueError('摄像机轨道合计最多 200 个不同时刻、最长一小时。')
         names = {k.time_sec:k.name for k in (Keyframe.from_dict(k) for k in data['keyframes'])}
         obj = cls.__new__(cls)
@@ -229,8 +231,27 @@ class ChannelTrajectory(Trajectory):
         points = [obj.position(t) for t in sample_times]
         obj.channel_length = sum(math.dist(a,b) for a,b in zip(points,points[1:]))
         keys = [Keyframe(t,obj.sample(t),names.get(t,'')) for t in times]
-        Trajectory.__init__(obj, keys, **settings)
+        Trajectory.__init__(obj, keys or [Keyframe(0, obj.sample(0))], **settings)
+        if not keys:
+            obj.keyframes, obj._times = (), ()
         return obj
+
+    @property
+    def start_time(self):
+        return self._times[0] if self._times else 0.0
+
+    @property
+    def end_time(self):
+        return self._times[-1] if self._times else 0.0
+
+    def keyframe_times(self):
+        return list(self._times)
+
+    def sample_uniform(self, sample_rate_hz=100):
+        rate = _number(sample_rate_hz, 'sample_rate_hz')
+        if rate <= 0:
+            raise ValueError('sample_rate_hz must be positive')
+        return super().sample_uniform(rate) if self.keyframes else []
 
     def position(self, time):
         return tuple(self.children[name].sample(time) for name in ('x','y','z'))

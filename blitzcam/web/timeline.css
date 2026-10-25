@@ -1,4 +1,15 @@
 /* Sequence editor chrome; palette matches the workbench theme. */
+.seq-beat-label{height:24px;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid var(--line);color:var(--lime)}
+.seq-beat-label[hidden]{display:none}
+.seq-beat-label i{width:5px;height:5px;border-radius:50%;background:var(--lime)}
+.seq-beat-label span{flex:1;font-size:10px}
+.seq-beat-label output{font:10px var(--num)}
+.seq-beat-bg{fill:#cfed8308}
+.seq-beat{cursor:pointer}
+.seq-beat-hit{fill:transparent}
+.seq-beat path{stroke:#93a765;stroke-width:1;pointer-events:none}
+.seq-beat.major path{stroke:var(--lime);stroke-width:2}
+.seq-beat:hover path,.seq-beat:focus-visible path{stroke:#f0ffd0;stroke-width:3}
 .seq-key-warning{margin:0;padding:5px 10px;background:#493e253d;border-top:1px solid #74613c;color:#d8c297;font-size:9px;line-height:1.5;flex:0 0 auto}
 .seq-inspector>.seq-keyframe-guard{margin:0;padding:0;min-width:0;flex:1;text-align:left;color:#b9cbd4;font-size:9px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .seq-inspector>.seq-keyframe-guard[hidden]{display:none}

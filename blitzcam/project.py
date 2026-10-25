@@ -13,12 +13,14 @@ from .trajectory import Trajectory, Keyframe, Pose
 def validate_project(data):
     if not isinstance(data, dict) or not isinstance(data.get("keyframes"), list):
         raise ValueError("项目需包含 keyframes 数组。")
-    if not 1 <= len(data["keyframes"]) <= 200:
-        raise ValueError("首版支持 1 至 200 个关键帧。")
+    if not (0 if 'camera_tracks' in data else 1) <= len(data["keyframes"]) <= 200:
+        raise ValueError("每个机位最多支持 200 个关键帧时刻。")
     tolerance = data.get("arc_tolerance", 1e-6)
     if not isinstance(tolerance, (int, float)) or not math.isfinite(tolerance) or not 1e-8 <= tolerance <= 0.1:
         raise ValueError("弧长误差容限需在 1e-8 至 0.1 世界单位之间。")
     trajectory = Trajectory.from_dict(data)
+    from .beat_grid import validate_beat_grid
+    trajectory.beat_grid = validate_beat_grid(data.get('beat_grid'))
     if trajectory.shooting_mode != 'camera_only' and trajectory.replay_timeline is not None:
         if trajectory.start_time < 0 or trajectory.end_time > trajectory.replay_timeline['duration_sec']:
             raise ValueError('摄像机关键帧需位于整场回放时间范围内。')
@@ -28,6 +30,11 @@ def validate_project(data):
         raise ValueError('镜头时间不能小于零。')
     if any(abs(x) > 1e7 for k in trajectory.keyframes for x in k.pose.position):
         raise ValueError("摄像机坐标超出首版允许范围。")
+    if data.get('multicam') is not None:
+        from .multicam import validate_multicam
+        trajectory.multicam = validate_multicam(data['multicam'], trajectory)
+        if len((json.dumps(trajectory.to_dict(), ensure_ascii=False, indent=2, allow_nan=False) + '\n').encode('utf-8')) > 2*1024*1024:
+            raise ValueError('项目 JSON 不能超过 2 MiB，请减少机位或关键帧。')
     return trajectory
 
 
@@ -37,6 +44,10 @@ def edit_project(data):
         q = quaternion_from_angles(f["yaw_deg"], f["pitch_deg"], f["roll_deg"])
         frames.append(Keyframe.from_dict({"time_sec": f["time_sec"], **Pose(f["position"], q, f["horizontal_fov_deg"]).to_dict(), "name": f.get("name", "")}).to_dict())
     extra = {}
+    if 'beat_grid' in data:
+        extra['beat_grid'] = data['beat_grid']
+    if 'multicam' in data:
+        extra['multicam'] = data['multicam']
     if 'camera_track_controls' in data:
         from .channels import tracks_from_controls
         extra['camera_tracks'] = tracks_from_controls(data['camera_track_controls'])
@@ -111,6 +122,8 @@ def atomic_json(path, data):
 def samples(trajectory, rate_hz):
     if not isinstance(rate_hz, (int, float)) or not math.isfinite(rate_hz) or not 1 <= rate_hz <= 240:
         raise ValueError("采样率需在 1 至 240 Hz 之间。")
+    if not trajectory.keyframes:
+        return []
     if trajectory.shooting_mode == 'camera_only':
         # Preview is bounded in sample count, never in authored duration. Include
         # every exact knot so a short move in a long project cannot disappear.

@@ -1,6 +1,6 @@
 // Headless synthetic fixture: no desktop automation or real game access.
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {enterFixture}=require('./ui_fixture.cjs');
+const {enterFixture,setSpeedCurveFixture}=require('./ui_fixture.cjs');
 const base=process.argv[2],out=path.resolve('output/timeline-074-acceptance');fs.mkdirSync(out,{recursive:true});
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
@@ -45,7 +45,7 @@ const base=process.argv[2],out=path.resolve('output/timeline-074-acceptance');fs
   assert.deepEqual((await server()).project,before,'Ctrl-click edits a draft only');
   await save();const recorded=(await server()).project;
   for(const channel of channels)assert.ok(recorded.camera_tracks[channel].some(k=>k.time_sec===18.5));
-  await page.locator('#tabSpeed').click();await page.locator('#timelineSpeedPreset').click();await save();
+  await page.locator('#tabSpeed').click();await setSpeedCurveFixture(page);await save();
   const curved=(await server()).project;
   // Ctrl-click rate also keeps the replay timestamp despite changing its integral.
   await clickTrack('rate',18.5);

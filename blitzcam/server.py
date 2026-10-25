@@ -35,45 +35,107 @@ WEB = Path(__file__).resolve().parent / "web"
 def read_recent():
     try:
         data = json.loads((OUTPUT/'recent-projects.json').read_text(encoding='utf-8'))
-        return [e for e in data if isinstance(e, dict) and isinstance(e.get('path'), str)][:20]
+        return [e for e in data if isinstance(e, dict) and isinstance(e.get('path'), str)][:20] if isinstance(data, list) else []
     except (OSError, ValueError):
         return []
 
 
+def project_path_key(path):
+    return os.path.normcase(str(Path(path).resolve()))
+
+
+def hidden_projects():
+    try:
+        path = OUTPUT/'hidden-projects.json'
+        if path.stat().st_size > 2*1024*1024:
+            return set()
+        data = json.loads(path.read_text(encoding='utf-8'))
+        return {project_path_key(p) for p in data if isinstance(p, str)} if isinstance(data, list) else set()
+    except (OSError, ValueError):
+        return set()
+
+
 def record_recent(path):
     resolved = str(Path(path).resolve())
-    entries = [e for e in read_recent() if str(Path(e['path']).resolve()) != resolved]
+    identity = project_path_key(resolved)
+    entries = [e for e in read_recent() if project_path_key(e['path']) != identity]
     entries.insert(0, {'path': resolved, 'last_opened': datetime.now(timezone.utc).isoformat()})
     try:
+        hidden = hidden_projects()
+        if identity in hidden:
+            hidden.remove(identity)
+            atomic_json(OUTPUT/'hidden-projects.json', sorted(hidden))
         atomic_json(OUTPUT/'recent-projects.json', entries[:20])
     except OSError:
         pass
 
 
 def forget_recent(path):
-    resolved = str(Path(path).resolve())
-    atomic_json(OUTPUT/'recent-projects.json', [e for e in read_recent() if str(Path(e['path']).resolve()) != resolved])
+    identity = project_path_key(path)
+    # An explicit removal stays hidden even when the file is in the scanned
+    # project folder. Opening it again restores it to the list.
+    atomic_json(OUTPUT/'hidden-projects.json', sorted(hidden_projects() | {identity}))
+    atomic_json(OUTPUT/'recent-projects.json', [e for e in read_recent() if project_path_key(e['path']) != identity])
+
+
+def project_list_item(path, last_opened=None, *, discovered=False):
+    p = Path(path).resolve()
+    item = {'path': str(p), 'name': p.stem, 'last_opened': last_opened,
+            'exists': False, 'size_bytes': None, 'modified_at': None,
+            'shooting_mode': None, 'keyframes': None, 'replay': ''}
+    try:
+        item['exists'] = p.is_file()
+        if not item['exists']:
+            return None if discovered else item
+        stat = p.stat()
+        item['size_bytes'] = stat.st_size
+        item['modified_at'] = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+        if stat.st_size > 2*1024*1024:
+            return None if discovered else item
+        # Discovery only includes real, openable projects, not settings, editor
+        # snapshots or unrelated JSON. Merely listing never records an open.
+        data = read_project(p).to_dict() if discovered else json.loads(p.read_text(encoding='utf-8-sig'))
+        item['shooting_mode'] = data.get('shooting_mode') or 'replay'
+        tracks = data.get('camera_tracks')
+        item['keyframes'] = len({k['time_sec'] for rows in tracks.values() for k in rows} if tracks
+                                else {k['time_sec'] for k in data.get('keyframes', [])})
+        timeline = data.get('replay_timeline') or {}
+        item['replay'] = Path(timeline['replay_file']).name if timeline.get('replay_file') else ''
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
+        if discovered:
+            return None
+    return item
 
 
 def recent_listing():
-    out = []
+    out, seen, hidden = [], set(), hidden_projects()
     for entry in read_recent():
-        p = Path(entry['path'])
-        item = {'path': entry['path'], 'name': p.stem, 'last_opened': entry.get('last_opened'),
-                'exists': p.is_file(), 'size_bytes': None, 'shooting_mode': None, 'keyframes': None, 'replay': ''}
-        if item['exists']:
-            try:
-                item['size_bytes'] = p.stat().st_size
-                data = json.loads(p.read_text(encoding='utf-8'))
-                item['shooting_mode'] = data.get('shooting_mode') or 'replay'
-                tracks = data.get('camera_tracks')
-                item['keyframes'] = len({k['time_sec'] for rows in tracks.values() for k in rows} if tracks
-                                        else {k['time_sec'] for k in data.get('keyframes', [])})
-                timeline = data.get('replay_timeline') or {}
-                item['replay'] = Path(timeline['replay_file']).name if timeline.get('replay_file') else ''
-            except (OSError, ValueError, KeyError):
-                pass
-        out.append(item)
+        try:
+            identity = project_path_key(entry['path'])
+            if identity in seen or identity in hidden:
+                continue
+            out.append(project_list_item(entry['path'], entry.get('last_opened')))
+            seen.add(identity)
+        except (OSError, ValueError):
+            continue
+    directory = Path(read_settings(OUTPUT)['project_directory'])
+    try:
+        candidates = sorted(directory.iterdir(), key=lambda p: p.name.casefold())
+    except OSError:
+        candidates = []  # A disconnected/unavailable folder must not hide Recents.
+    for path in candidates:
+        if path.suffix.lower() != '.json':
+            continue
+        try:
+            identity = project_path_key(path)
+            if identity in seen or identity in hidden:
+                continue
+            item = project_list_item(path, discovered=True)
+            if item is not None:
+                out.append(item)
+                seen.add(identity)
+        except (OSError, ValueError):
+            continue
     return out
 
 
@@ -98,7 +160,7 @@ class Workstation:
         self.editor_state = read_editor_state(OUTPUT, self.project_path) if self.project_path else None
         self.terrain = TerrainStore()
         self.replay_preview = ReplayPreview()
-        self.selected_time = self.project.keyframes[0].time_sec if self.project else 0
+        self.selected_time = self.project.start_time if self.project else 0
         self.desktop_process = None
         self.playback = PositionPlayback(OUTPUT/'playback-runs')
         if self.project_path and self.project_path.exists():
@@ -392,7 +454,7 @@ class Workstation:
             self.project = project
             self.project_revision += 1
             if not any(k.time_sec == self.selected_time for k in project.keyframes):
-                self.selected_time = project.keyframes[0].time_sec
+                self.selected_time = project.start_time
 
     def _keyframe_metadata(self, timeline):
         if not timeline or not timeline.get('replay_file'):
@@ -424,7 +486,16 @@ class Workstation:
 
     def validate_keyframe_edit(self, project):
         from .replay_timeline import validate_new_keyframes
-        validate_new_keyframes(self.project, project, read_settings(OUTPUT), self._keyframe_metadata(project.replay_timeline))
+        from .multicam import alternatives
+        settings, metadata = read_settings(OUTPUT), self._keyframe_metadata(project.replay_timeline)
+        old = alternatives(self.project)
+        current = getattr(project, 'multicam', None)
+        previous = self.project
+        if current:
+            previous = old.get(current['active_camera_id'], previous)
+        validate_new_keyframes(previous, project, settings, metadata)
+        for identity, candidate in alternatives(project).items():
+            validate_new_keyframes(old.get(identity, self.project), candidate, settings, metadata)
 
     def check_capture_time(self, when):
         guard = self.keyframe_guard()
@@ -452,7 +523,7 @@ class Workstation:
         self.project_path = Path(path).resolve()
         self.project = project
         self.project_revision += 1
-        self.selected_time = project.keyframes[0].time_sec
+        self.selected_time = project.start_time
         self.editor_state = read_editor_state(OUTPUT, self.project_path) if remember else None
         if remember:
             record_recent(self.project_path)
@@ -465,6 +536,8 @@ class Workstation:
             if draft is not None:
                 if not isinstance(draft, dict):
                     raise ValueError('自动保存草稿格式无效。')
+                draft.setdefault('multicam', getattr(self.project, 'multicam', None))
+                draft.setdefault('beat_grid', getattr(self.project, 'beat_grid', None))
                 project = edit_project(draft)
                 if self.playback.state()['active']:
                     raise CameraError('运镜期间请先停止，再编辑或记录属性关键帧。')
@@ -519,9 +592,9 @@ class Workstation:
                 raise CameraError('请先停止运镜，再删除项目。')
             if self.replay_launch['state'] in ('choosing', 'launching'):
                 raise CameraError('请先完成回放选择与启动，再删除项目。')
-            known = any(Path(item['path']).resolve() == target for item in read_recent())
+            known = any(Path(item['path']).resolve() == target for item in recent_listing())
             if not known or target.suffix.lower() != '.json' or not target.is_file():
-                raise ValueError('该项目已不在最近列表或文件不存在，请刷新列表。')
+                raise ValueError('该项目已不在项目列表或文件不存在，请刷新列表。')
             current = target == self.project_path
             if current:
                 # Prepare an unsaved workspace before touching the current file.
@@ -631,7 +704,7 @@ class Workstation:
             if timeline:
                 timeline=deepcopy(timeline)
                 timeline.update(work_start_sec=when, work_end_sec=min(timeline['duration_sec'],when+8))
-            self.set_project(validate_project({'keyframes':[{'time_sec':when,**{k:snapshot['camera'][k]for k in ('position','quaternion','horizontal_fov_deg')}}], 'position_interpolation':'smooth', 'replay_timeline':timeline, 'shooting_mode':mode, 'replay_speed':self.project.replay_speed}))
+            self.set_project(validate_project({'keyframes':[{'time_sec':when,**{k:snapshot['camera'][k]for k in ('position','quaternion','horizontal_fov_deg')}}], 'position_interpolation':'smooth', 'replay_timeline':timeline, 'shooting_mode':mode, 'replay_speed':self.project.replay_speed, 'multicam':getattr(self.project, 'multicam', None), 'beat_grid':getattr(self.project, 'beat_grid', None)}))
             atomic_json(OUTPUT/'captures'/f'{stamp}.json',snapshot)
             self.sample=snapshot
 
@@ -660,6 +733,7 @@ class Workstation:
             self.check_revision(expected_revision)
             if mode not in ('current','prepare','locate','auto'):raise ValueError('未知播放方式。')
             if type(reverse)is not bool or type(orientation_enabled)is not bool or type(fov_enabled)is not bool or type(speed_only)is not bool:raise ValueError('播放选项需为布尔值。')
+            if not speed_only and not self.project.keyframes:raise ValueError('当前机位为空，请先添加关键帧。')
             if self.session is None:raise CameraError('请先连接暂停的回放自由镜头。')
             timeline=self.project.replay_timeline
             if self.project.shooting_mode=='replay' and timeline and timeline.get('replay_file'):
@@ -844,6 +918,7 @@ def make_handler(workstation):
                       "/replay-preview-worker.js": ("replay-preview-worker.js", "text/javascript; charset=utf-8"),
                       "/replay-preview.css": ("replay-preview.css", "text/css; charset=utf-8"),
                       "/timeline.js": ("timeline.js", "text/javascript; charset=utf-8"),
+                      "/beat-grid.js": ("beat-grid.js", "text/javascript; charset=utf-8"),
                        "/speed-editor.js": ("speed-editor.js", "text/javascript; charset=utf-8"),
                       "/timeline.css": ("timeline.css", "text/css; charset=utf-8"),
                       "/replay-open.css": ("replay-open.css", "text/css; charset=utf-8"),
@@ -957,6 +1032,8 @@ def make_handler(workstation):
                         data.setdefault("arc_tolerance", workstation.project.arc_tolerance)
                         data.setdefault('replay_timeline', workstation.project.replay_timeline)
                         data.setdefault('shooting_mode', workstation.project.shooting_mode)
+                        data.setdefault('multicam', getattr(workstation.project, 'multicam', None))
+                        data.setdefault('beat_grid', getattr(workstation.project, 'beat_grid', None))
                         if 'camera_track_controls' not in data and hasattr(workstation.project, 'camera_tracks'):
                             raise ValueError('项目包含独立参数轨道，请在主时间轴编辑，或导入完整项目。')
                         workstation.set_project(edit_project(data), data.get("expected_revision"))

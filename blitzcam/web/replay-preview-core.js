@@ -96,7 +96,8 @@ export function flightSeekSeconds(heldSeconds,{seekDelay=.25,seekRamp=3,seekMax=
 
 export function cameraEvaluator(tracks,smooth,easing){
   const names=['x','y','z','yaw','pitch','roll','zoom'];
-  const samplers=names.map((n,i)=>scalarTrack(tracks?.[n],smooth&&i<3,easing));
+  if(!names.some(n=>tracks?.[n]?.length))return ()=>null;
+  const samplers=names.map((n,i)=>tracks?.[n]?.length?scalarTrack(tracks[n],smooth&&i<3,easing):()=>n==='zoom'?60:0);
   return time=>{const v=samplers.map(f=>f(time));return v.every(Number.isFinite)?{position:v.slice(0,3),yaw:v[3],pitch:v[4],roll:v[5],zoom:v[6]}:null;};
 }
 export function cameraBasis(yaw,pitch,roll){

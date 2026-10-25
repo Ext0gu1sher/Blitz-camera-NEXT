@@ -72,6 +72,69 @@ class ProjectFileTests(unittest.TestCase):
         self.assertFalse(entry['exists'])
         self.assertEqual(entry['name'], 'gone')
 
+    def test_discovers_projects_without_opening_or_recording_them(self):
+        folder = (self.out/'项目库').resolve()
+        self.request('/api/settings', {'project_directory': str(folder)})
+        original = self.app.project_path
+        source = json.dumps(self.app.project.to_dict())
+        paths = [folder/f'项目 {i}.json' for i in range(23)]
+        for path in paths:
+            path.write_text(source, encoding='utf-8-sig')
+        before = read_recent()
+        listing = self.request('/api/projects/recent')['projects']
+        self.assertEqual({e['path'] for e in listing}, {str(p) for p in paths})
+        self.assertTrue(all(e['last_opened'] is None and e['modified_at'] and e['keyframes'] for e in listing))
+        self.assertEqual(read_recent(), before)
+        self.assertEqual(self.app.project_path, original)
+        self.assertEqual(paths[0].read_text(encoding='utf-8-sig'), source)
+        self.request('/api/projects/open', {'path': str(paths[0])})
+        listing = self.request('/api/projects/recent')['projects']
+        self.assertEqual(len(listing), len(paths))
+        self.assertEqual(listing[0]['path'], str(paths[0]))
+        self.assertIsNotNone(listing[0]['last_opened'])
+
+    def test_discovery_skips_unrelated_broken_oversized_files_and_subfolders(self):
+        folder = (self.out/'项目库').resolve()
+        self.request('/api/settings', {'project_directory': str(folder)})
+        for name, content in [('settings.json', '{}'), ('broken.json', '{'), ('array.json', '[]'),
+                              ('invalid.json', '{"keyframes":[{}]}'), ('huge.json', ' '*2097153)]:
+            (folder/name).write_text(content, encoding='utf-8')
+        nested = folder/'子目录';nested.mkdir()
+        source = json.dumps(self.app.project.to_dict())
+        (nested/'项目.json').write_text(source, encoding='utf-8')
+        (folder/'folder.json').mkdir()
+        good = folder/'正常.JSON';good.write_text(source, encoding='utf-8')
+        self.assertEqual([e['path'] for e in self.request('/api/projects/recent')['projects']], [str(good)])
+
+    def test_folder_switch_refreshes_discovery_but_keeps_recent_projects(self):
+        first, second = (self.out/'first').resolve(), (self.out/'second').resolve()
+        source = json.dumps(self.app.project.to_dict())
+        self.request('/api/settings', {'project_directory': str(first)})
+        for name in ('opened', 'unopened'):
+            (first/f'{name}.json').write_text(source, encoding='utf-8')
+        self.request('/api/projects/open', {'path': str(first/'opened.json')})
+        self.request('/api/settings', {'project_directory': str(second)})
+        (second/'new.json').write_text(source, encoding='utf-8')
+        listing = self.request('/api/projects/recent')['projects']
+        self.assertEqual({e['path'] for e in listing}, {str(first/'opened.json'), str(second/'new.json')})
+        (second/'new.json').unlink();second.rmdir()
+        self.assertEqual([e['path'] for e in self.request('/api/projects/recent')['projects']], [str(first/'opened.json')])
+
+    def test_discovered_project_can_be_forgotten_reopened_and_deleted(self):
+        folder = (self.out/'项目库').resolve()
+        self.request('/api/settings', {'project_directory': str(folder)})
+        target = folder/'未打开.json';target.write_text(json.dumps(self.app.project.to_dict()), encoding='utf-8')
+        self.request('/api/projects/forget', {'path': str(target)})
+        self.assertTrue(target.is_file())
+        self.assertEqual(self.request('/api/projects/recent')['projects'], [])
+        self.request('/api/projects/open', {'path': str(target)})
+        self.assertEqual(len(self.request('/api/projects/recent')['projects']), 1)
+        unopened = folder/'直接删除.json';unopened.write_bytes(target.read_bytes())
+        with patch('blitzcam.server.recycle_project', side_effect=lambda p: (p.unlink(), True)[1]) as recycle:
+            self.request('/api/projects/delete', {'path': str(unopened), 'expected_revision': self.app.project_revision})
+        recycle.assert_called_once_with(unopened)
+        self.assertFalse(unopened.exists())
+
     def test_save_project_as_switches_path_and_records(self):
         target = self.out/'projects'/'elsewhere.json'
         result = self.app.save_project_as(target)

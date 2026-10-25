@@ -14,7 +14,11 @@ const state = {
   bounds: {min: [-10, -10, 0], max: [10, 10, 0]}, canvasWidth: 1, canvasHeight: 1,
   stateSequence: 0, appliedSequence: 0, previewSequence: 0, previewPlaySequence: 0, pollInFlight: false, animationRequest: 0, serverRevision: null,
   shootingMode: "replay", rateMode: "curve", tracks: null, timeline: null, replayInfo: null, replayLaunch: null, appliedLaunchId: null, savingTimeline: false,
+  multicam: null, workspaceTab: 'Project', cameraHistory: new Map(), ghostPaths: true,
+  cameraUndo: [], cameraRedo: [],
+  beatGrid: BlitzBeatGrid.defaults(),
 };
+let beatEditOriginal=null;
 let toastTimeout, sequenceEditor, draftTimer, speedCurveEditor, finishEaseDrag;
 let replayPreviewPane=null;
 let autoSaveTimer=null,autoSavePromise=null,editorSavePromise=null,pendingEditorRestore=null,pendingPreviewRestore=null,lastEditorSignature='';
@@ -42,7 +46,7 @@ function syncReplayPreview(){
 function mountReplayPreview(){
   if(replayPreviewPane||!window.BlitzReplayPreview)return;
   replayPreviewPane=window.BlitzReplayPreview.mount({
-    locked:()=>state.busy||state.playback.active||!state.serviceReady||['choosing','launching'].includes(state.replayLaunch?.state)||state.connection.state==='connecting',
+    locked:()=>state.busy||state.playback.active||!state.serviceReady||!currentCamera()||['choosing','launching'].includes(state.replayLaunch?.state)||state.connection.state==='connecting',
     pause:()=>stopPlayback(),
     togglePlayback:()=>play(),
     stepTime:direction=>seek(state.previewTime+direction/state.previewRate),
@@ -86,7 +90,10 @@ function tracksFromFrames(frames){
   return Object.fromEntries(BlitzTimeline.CHANNELS.map(([name],i)=>[name,frames.map(f=>({time_sec:f.time_sec,value:[...f.position,f.yaw_deg,f.pitch_deg,f.roll_deg,f.horizontal_fov_deg][i]}))]));
 }
 function editPayload(){
+  syncMulticam();
   return {keyframes:copy(state.controls),camera_track_controls:copy(state.tracks),timing:'keyframes',
+    multicam:copy(state.multicam),
+    beat_grid:copy(state.beatGrid),
     replay_timeline:copy(state.timeline),shooting_mode:state.shootingMode,
     easing:$("easingSelect").value,position_interpolation:$("interpolationSelect").value,replay_speed:speedSettings()};
 }
@@ -110,7 +117,510 @@ function applyTimelineChange(data){
   $("timelineRateInterpolation").value=data.speed.interpolation;
   updateModeUI();updatePreviewRange();
   updateKeyframeCount();setDirty(true);renderSpeedRows();updateSpeedExplanation();queueDraftPreview();
+  syncMulticam();renderMulticam();
 }
+function currentCamera(){return state.multicam?.cameras.find(c=>c.id===state.multicam.active_camera_id);}
+const MAX_CAMERAS=16,cameraClipboardType='application/x-blitzcam-camera',cameraClipboardPrefix='BlitzCamera camera\n';
+const CAMERA_COLORS=['#d6ec96','#8fd3d8','#eba89c','#c4a7e8','#ecc17c','#92cb96','#90b6e6','#e89cc2','#b9d873','#79d0b2','#e98780','#9db9ef','#e3d488','#8fd4a8','#d2a0ec','#f0a97d'];
+let cameraClipboard=null,cameraClipboardRequested=false;
+let cameraMenuScope=null,cameraNewTrigger=null,cameraDrag=null,suppressCameraClick=false;
+let cameraNewMenuSuppressed=false,cameraMenuSuppressedId=null,cameraMenuMoreId=null,kfCounter=0;
+const cameraSamplesCache=new Map(),ghostCache=new Map();
+function multicamId(){return crypto.randomUUID();}
+function validCameraSlot(value){return Number.isInteger(value)&&value>=0&&value<MAX_CAMERAS?value:null;}
+function ensureCameraSlots(){
+  const used=new Set();
+  for(const c of state.multicam?.cameras||[]){c.slot=validCameraSlot(c.slot);if(c.slot!==null&&!used.has(c.slot))used.add(c.slot);else c.slot=null;}
+  for(const c of state.multicam?.cameras||[])if(c.slot===null){c.slot=freeCameraSlot();used.add(c.slot);}
+}
+function freeCameraSlot(){
+  const used=new Set((state.multicam?.cameras||[]).map(c=>validCameraSlot(c.slot)).filter(s=>s!==null));
+  for(let s=0;s<MAX_CAMERAS;s++)if(!used.has(s))return s;
+  return null;
+}
+function cameraLetter(camera){return String.fromCharCode(65+(validCameraSlot(camera?.slot)??0));}
+function cameraColor(camera){return CAMERA_COLORS[(validCameraSlot(camera?.slot)??0)%CAMERA_COLORS.length];}
+function cameraTrackStat(camera){
+  const times=[...new Set(Object.values(camera?.camera_tracks||{}).flat().map(k=>k.time_sec))].sort((a,b)=>a-b);
+  if(!times.length)return {text:'无关键帧',title:'尚无关键帧'};
+  return {text:`${times.length} 关键帧`,
+    title:`${times.length} 个关键帧时刻 · ${times[0].toFixed(1)}–${times.at(-1).toFixed(1)} s（跨度 ${(times.at(-1)-times[0]).toFixed(1)} s）`};
+}
+function cameraBadgeNode(camera){
+  const badge=document.createElement('span');badge.className='camera-badge';
+  const dot=document.createElement('i');dot.className='camera-dot';dot.style.background=cameraColor(camera);
+  const letter=document.createElement('b');letter.className='camera-letter';letter.textContent=cameraLetter(camera);
+  badge.append(dot,letter);return badge;
+}
+function fillCameraBadge(el,camera,prefix=''){
+  el.replaceChildren();
+  if(!camera)return;
+  const badge=cameraBadgeNode(camera);
+  if(prefix)badge.prepend(document.createTextNode(prefix+' '));
+  el.append(badge);
+}
+function emptyCameraTracks(){return Object.fromEntries(BlitzTimeline.CHANNELS.map(([name])=>[name,[]]));}
+function cameraSettings(){
+  return {replay_speed:copy(speedSettings()),easing:$('easingSelect').value,position_interpolation:$('interpolationSelect').value,
+    work_range:{work_start_sec:state.timeline.work_start_sec,work_end_sec:state.timeline.work_end_sec}};
+}
+function initialMulticam(){
+  const camera={id:multicamId(),name:'主机位',camera_tracks:copy(state.tracks),keyframes:copy(state.project.keyframes||[]),
+    replay_speed:copy(state.project.replay_speed),easing:state.project.easing,position_interpolation:state.project.position_interpolation,
+    work_range:{work_start_sec:state.timeline.work_start_sec,work_end_sec:state.timeline.work_end_sec}};
+  return {version:2,active_camera_id:camera.id,cameras:[camera]};
+}
+function cameraControls(camera){
+  // Pose values are projected from camera_tracks by the evaluator; preserve key names.
+  return (camera?.keyframes||[]).map(k=>({...k,yaw_deg:0,pitch_deg:0,roll_deg:0}));
+}
+function syncMulticam(){
+  const camera=currentCamera();if(!camera||!state.tracks)return;
+  Object.assign(camera,cameraSettings(),{camera_tracks:copy(state.tracks),
+    keyframes:state.controls.map(k=>({time_sec:k.time_sec,name:k.name||'',position:k.position,quaternion:[1,0,0,0],horizontal_fov_deg:k.horizontal_fov_deg}))});
+}
+function showWorkspaceTab(tab){
+  closeCameraMenu();
+  state.workspaceTab=tab==='Multicam'?'Multicam':'Project';
+  for(const name of ['Project','Multicam']){const active=name===state.workspaceTab;$('tab'+name).classList.toggle('active',active);$('tab'+name).setAttribute('aria-selected',String(active));$('pane'+name).hidden=!active;}
+}
+function focusCamera(){($('multicamList').querySelector('[aria-selected=true]')||$('multicamList')).focus({preventScroll:true});}
+function renderMulticam(){
+  const camera=currentCamera(),rows=state.multicam?.cameras||[],locked=multicamLocked();
+  const listFocused=$('multicamList').contains(document.activeElement),stripFocused=$('multicamStrip').contains(document.activeElement);
+  $('multicamCount').textContent=rows.length+' / '+MAX_CAMERAS;$('multicamCount').hidden=rows.length<12;
+  $('multicamList').replaceChildren(...rows.map(c=>{
+    const item=document.createElement('div');item.className='multicam-camera';item.dataset.cameraId=c.id;
+    item.setAttribute('role','option');item.setAttribute('aria-selected',String(c.id===camera?.id));item.setAttribute('aria-disabled',String(locked));
+    item.tabIndex=c.id===camera?.id?0:-1;
+    const dot=document.createElement('i');dot.className='camera-dot';dot.style.background=cameraColor(c);
+    const letter=document.createElement('b');letter.className='camera-letter';letter.textContent=cameraLetter(c);
+    const name=document.createElement('span');name.className='camera-name';name.textContent=c.name;
+    const status=document.createElement('small'),stat=cameraTrackStat(c);status.textContent=stat.text;status.title=stat.title;
+    const more=document.createElement('button');more.type='button';more.className='camera-more';more.tabIndex=-1;
+    more.setAttribute('aria-label',c.name+' 的更多操作');more.setAttribute('aria-haspopup','menu');more.append(homeIcon('i-more'));
+    item.append(dot,letter,name,status,more);item.title=c.name+' · 右键操作 · 拖动排序';
+    return item;
+  }));
+  if(!rows.length){const empty=document.createElement('p');empty.className='multicam-empty';empty.textContent='新建机位，开始设计独立轨道';$('multicamList').append(empty);}
+  const strip=$('multicamStrip');strip.hidden=!state.project;
+  strip.replaceChildren(...rows.map(c=>{
+    const chip=document.createElement('div');chip.className='strip-chip';chip.dataset.cameraId=c.id;
+    chip.setAttribute('role','tab');chip.setAttribute('aria-selected',String(c.id===camera?.id));chip.setAttribute('aria-disabled',String(locked));
+    chip.tabIndex=c.id===camera?.id?0:-1;
+    const color=cameraColor(c);
+    const dot=document.createElement('i');dot.className='camera-dot';dot.style.background=color;
+    const letter=document.createElement('b');letter.className='camera-letter';letter.textContent=cameraLetter(c);
+    const name=document.createElement('span');name.className='camera-name';name.textContent=c.name;
+    chip.append(dot,letter,name);chip.title=c.name;
+    if(c.id===camera?.id){chip.style.borderColor=color;chip.style.background=color+'1f';}
+    return chip;
+  }),stripNewControls(rows.length));
+  strip.querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest',inline:'nearest'});
+  const multiple=rows.length>1;
+  fillCameraBadge($('cameraEditContext'),camera);$('cameraEditContext').title=camera?.name||'';$('cameraEditContext').hidden=!multiple;
+  fillCameraBadge($('multicamPreviewContext'),camera);$('multicamPreviewContext').title=camera?.name||'';$('multicamPreviewContext').hidden=!multiple;
+  fillCameraBadge($('speedCameraOwn'),camera,'本机位 ·');$('speedCameraOwn').hidden=!multiple;
+  fillCameraBadge($('curveCameraOwn'),camera,'本机位 ·');$('curveCameraOwn').hidden=!multiple;
+  updateMulticamButtons();
+  if(listFocused)focusCamera();
+  else if(stripFocused)strip.querySelector('[aria-selected=true]')?.focus({preventScroll:true});
+}
+function stripNewControls(count){
+  const wrap=document.createElement('span');wrap.className='strip-new';
+  const add=document.createElement('button');add.type='button';add.className='ib';add.dataset.cameraAdd='';add.textContent='＋';
+  add.title=`新建机位 · 已有 ${count} / ${MAX_CAMERAS}`;add.setAttribute('aria-label','新建机位');
+  const more=document.createElement('button');more.type='button';more.className='ib';more.dataset.cameraAddMore='';more.textContent='▾';
+  more.setAttribute('aria-label','新建方式');more.setAttribute('aria-haspopup','menu');more.setAttribute('aria-expanded','false');
+  wrap.append(add,more);return wrap;
+}
+function multicamLocked(){return state.busy||state.playback.active||!state.project||!state.serviceReady||editorInteracting();}
+function cameraItemDisabled(el){return el.getAttribute('aria-disabled')==='true';}
+function updateMulticamButtons(){
+  const locked=multicamLocked(),count=state.multicam?.cameras.length||0,atMax=count>=MAX_CAMERAS;
+  $('paneMulticam').querySelectorAll('button').forEach(e=>e.disabled=locked);
+  $('multicamNew').disabled=$('multicamNewMore').disabled=locked||atMax;
+  $('multicamNew').title=(atMax?'已达到 16 个机位上限':'新建独立空轨')+` · 已有 ${count} / ${MAX_CAMERAS}`;
+  $('multicamNewMenu').querySelectorAll('button').forEach(e=>e.disabled=locked||atMax||(e.dataset.cameraNew==='duplicate'&&!currentCamera()));
+  $('multicamMenu').querySelectorAll('button').forEach(e=>e.disabled=locked||(e.dataset.cameraAction==='paste'?atMax:!currentCamera()));
+  $('multicamStrip').querySelectorAll('button').forEach(e=>e.disabled=locked||atMax);
+  $('multicamList').querySelectorAll('[data-camera-id]').forEach(e=>e.setAttribute('aria-disabled',String(locked)));
+  $('multicamStrip').querySelectorAll('[data-camera-id]').forEach(e=>e.setAttribute('aria-disabled',String(locked)));
+}
+function rememberCameraHistory(){
+  const camera=currentCamera();if(camera&&sequenceEditor?.doc)
+    state.cameraHistory.set(camera.id,{undo:copy(sequenceEditor.undoStack),redo:copy(sequenceEditor.redoStack)});
+}
+function loadMulticamCamera(){
+  stopPlayback();clearTimeout(draftTimer);state.previewSequence++;
+  const camera=currentCamera(),view=BlitzEditorSession.captureTimeline(sequenceEditor,state.previewTime);
+  state.tracks=copy(camera?.camera_tracks||emptyCameraTracks());state.controls=cameraControls(camera);state.savedControls=copy(state.controls);
+  if(camera?.work_range)state.timeline={...state.timeline,...camera.work_range};
+  const speed=camera?.replay_speed||{mode:'fixed',rate:1,camera_clock:'replay',interpolation:'smooth',keyframes:[{progress:0,rate:1},{progress:1,rate:1}]};
+  state.rateMode=speed.mode==='fixed'?'fixed':'curve';state.speedFrames=copy(speed.keyframes||[{progress:0,rate:1},{progress:1,rate:1}]);
+  state.speedRange=speed.time_range?copy(speed.time_range):null;setRateOption(speed.rate??1);
+  $('speedInterpolation').value=speed.interpolation||'smooth';$('timelineRateInterpolation').value=$('speedInterpolation').value;
+  $('easingSelect').value=camera?.easing||'linear';$('interpolationSelect').value=camera?.position_interpolation||'smooth';
+  sequenceEditor.load(state.tracks,speedSettings(),false,state.timeline,state.shootingMode);
+  const history=state.cameraHistory.get(camera?.id);
+  // Undo belongs to this camera, while the replay binding and shooting mode
+  // belong to the project and may have changed since this camera was edited.
+  const restore=rows=>copy(rows||[]).map(row=>({...row,mode:state.shootingMode,
+    timeline:{...state.timeline,work_start_sec:row.timeline?.work_start_sec??state.timeline.work_start_sec,work_end_sec:row.timeline?.work_end_sec??state.timeline.work_end_sec}}));
+  sequenceEditor.undoStack=restore(history?.undo);sequenceEditor.redoStack=restore(history?.redo);
+  if(view)BlitzEditorSession.restoreTimeline(sequenceEditor,view);
+  replayPreviewPane?.stopFlight();if(replayPreviewPane)replayPreviewPane.override=null;
+  const cached=cameraSamplesCache.get(camera?.id);
+  if(cached)setSamples(cached.samples,cached.metadata);else setSamples([],null);
+  updateModeUI();renderSpeedRows();updateSpeedExplanation();renderMulticam();setDirty(true);syncReplayPreview();queueDraftPreview();
+}
+function editMulticam(fn){
+  if(multicamLocked())return;
+  syncMulticam();rememberCameraHistory();
+  try{fn();}catch(error){notify(error.message,true);renderMulticam();}
+}
+function selectCamera(id){
+  if(id===currentCamera()?.id)return;
+  editMulticam(()=>{state.multicam.active_camera_id=id;loadMulticamCamera();});
+}
+async function confirmCameraDelete(camera){
+  const dialog=$('cameraDeleteDialog');if(dialog.open)return false;
+  $('cameraDeleteName').textContent=camera.name;
+  $('cameraDeleteText').textContent=`将删除 ${new Set(Object.values(camera.camera_tracks||{}).flat().map(k=>k.time_sec)).size} 个关键帧。`;
+  dialog.returnValue='';dialog.showModal();
+  return (await new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue),{once:true})))==='delete';
+}
+function pushCameraHistory(label,before,after){
+  if(JSON.stringify(before)===JSON.stringify(after))return;
+  state.cameraUndo.push({label,before,after,kf:kfCounter});
+  if(state.cameraUndo.length>30)state.cameraUndo.shift();
+  state.cameraRedo.length=0;
+  refreshUndoButtons();
+}
+function recordCameraEdit(label,run){
+  syncMulticam();
+  const before={multicam:copy(state.multicam)};
+  run();
+  syncMulticam();
+  pushCameraHistory(label,before,{multicam:copy(state.multicam)});
+}
+function undoableCamera(){const top=state.cameraUndo.at(-1);return top&&top.kf===kfCounter&&!multicamLocked()?top:null;}
+function redoableCamera(){const top=state.cameraRedo.at(-1);return top&&top.kf===kfCounter&&!multicamLocked()?top:null;}
+function cameraHistoryStep(entry,target){
+  if(entry[target].beat_grid){state.beatGrid=copy(entry[target].beat_grid);sequenceEditor.render();syncBeatControls();setDirty(true);return;}
+  rememberCameraHistory();syncMulticam();
+  state.multicam=copy(entry[target].multicam);
+  loadMulticamCamera();focusCamera();
+}
+async function removeCamera(confirmDelete=false,cut=false){
+  if(multicamLocked())return;
+  syncMulticam();rememberCameraHistory();
+  const camera=currentCamera();if(!camera)return;
+  if(confirmDelete&&!(await confirmCameraDelete(camera)))return;
+  if(multicamLocked()||currentCamera()!==camera)return;
+  try{
+    const before={multicam:copy(state.multicam)};
+    const rows=state.multicam.cameras,index=rows.indexOf(camera);
+    rows.splice(index,1);
+    cameraSamplesCache.delete(camera.id);ghostCache.delete(camera.id);
+    state.multicam.active_camera_id=rows[Math.min(index,rows.length-1)]?.id||null;
+    loadMulticamCamera();focusCamera();
+    pushCameraHistory(`${cut?'剪切':'删除'}机位「${camera.name}」`,before,{multicam:copy(state.multicam)});
+    notify(cut?`已剪切机位「${camera.name}」，可用 Ctrl+V 粘贴 · Ctrl+Z 撤销。`:`已删除机位「${camera.name}」 · Ctrl+Z 撤销。`);
+  }catch(error){notify(error.message,true);renderMulticam();}
+}
+function startCameraRename(scope){
+  if(multicamLocked())return;
+  const camera=currentCamera();if(!camera)return;
+  const item=scope?.querySelector(`[data-camera-id="${camera.id}"]`),nameEl=item?.querySelector('.camera-name');
+  if(!nameEl)return;
+  const input=document.createElement('input');input.className='camera-rename';input.value=camera.name;input.maxLength=80;input.setAttribute('aria-label','机位名称');
+  nameEl.replaceWith(input);input.focus();input.select();
+  let done=false;
+  const finish=commit=>{
+    if(done)return;
+    const value=input.value.trim();
+    if(commit&&value!==camera.name){
+      if(!value||value.length>80){notify('名称需为 1–80 个字符。',true);input.focus();return;}
+      done=true;
+      editMulticam(()=>{recordCameraEdit(`机位「${camera.name}」改名`,()=>{camera.name=value;});renderMulticam();setDirty(true);focusCamera();});
+      return;
+    }
+    done=true;renderMulticam();
+  };
+  input.addEventListener('keydown',e=>{
+    e.stopPropagation();
+    if(e.key==='Enter'){e.preventDefault();finish(true);}
+    else if(e.key==='Escape'){e.preventDefault();finish(false);}
+  });
+  input.addEventListener('blur',()=>finish(true));
+  input.addEventListener('pointerdown',e=>e.stopPropagation());
+}
+function cameraClipboardScope(event){
+  let target=event.target;if([document,document.body,document.documentElement].includes(target))target=document.activeElement;
+  return !!target?.closest&&!target.closest('input,textarea,select,[contenteditable]:not([contenteditable=false])')&&!!target.closest('#paneMulticam,#multicamMenu,#multicamStrip,#multicamNewMenu');
+}
+function duplicateCameraName(base){
+  base=base.slice(0,72);let name=base,n=1;
+  while(state.multicam.cameras.some(c=>c.name===name)){name=base+' 副本'+(n===1?'':' '+n);n++;}
+  return name;
+}
+function cameraCopy(event,cut=false){
+  if(event.defaultPrevented||(!cameraClipboardRequested&&!cameraClipboardScope(event))||multicamLocked()||!currentCamera())return;
+  event.preventDefault();syncMulticam();
+  const payload={kind:'blitzcam-camera',version:1,camera:copy(currentCamera())},text=JSON.stringify(payload);
+  try{
+    if(!event.clipboardData)throw Error('无法写入剪贴板，机位未剪切。');
+    event.clipboardData.setData('text/plain',cameraClipboardPrefix+text);
+    try{event.clipboardData.setData(cameraClipboardType,text);}catch{}
+    cameraClipboard=payload;
+    if(cut)removeCamera(false,true);
+    else notify('机位已复制，可用 Ctrl+V 粘贴。');
+  }catch(error){notify(error.message,true);}
+}
+function parseCameraClipboard(text){
+  if(text.length>2*1024*1024)throw Error('机位剪贴板数据过大。');
+  const payload=JSON.parse(text.startsWith(cameraClipboardPrefix)?text.slice(cameraClipboardPrefix.length):text);
+  if(payload?.kind!=='blitzcam-camera'||payload.version!==1||!payload.camera||typeof payload.camera.name!=='string')throw Error('剪贴板中没有有效机位。');
+  return payload;
+}
+async function pasteCamera(payload){
+  if(multicamLocked())return;
+  if(!payload){notify('请先复制一个机位。',true);return;}
+  if(state.multicam.cameras.length>=MAX_CAMERAS){notify('每个项目最多支持 16 个机位。',true);return;}
+  syncMulticam();rememberCameraHistory();
+  const before={multicam:copy(state.multicam)};
+  await action(async()=>{
+    const source=payload.camera,used=new Set(state.multicam.cameras.map(c=>c.slot));
+    const slot=validCameraSlot(source.slot)!==null&&!used.has(source.slot)?source.slot:freeCameraSlot();
+    const camera={...copy(source),id:multicamId(),name:duplicateCameraName(source.name),slot};
+    const multicam={...copy(state.multicam),active_camera_id:camera.id,cameras:[...copy(state.multicam.cameras),camera]};
+    // Validate the entire proposed project before changing any editor state.
+    await api('/api/evaluate',{...editPayload(),multicam,keyframes:cameraControls(camera),camera_track_controls:camera.camera_tracks,
+      replay_speed:camera.replay_speed,easing:camera.easing,position_interpolation:camera.position_interpolation,
+      replay_timeline:{...state.timeline,...camera.work_range},time_sec:state.previewTime});
+    state.multicam=multicam;loadMulticamCamera();cameraClipboard=copy(payload);
+    pushCameraHistory(`粘贴机位「${camera.name}」`,before,{multicam:copy(state.multicam)});
+  });
+  focusCamera();
+}
+function closeCameraMenu(restore=false){$('multicamMenu').hidden=true;cameraMenuMoreId=null;if(restore)focusCamera();}
+function showCameraMenu(x,y,scope){
+  if(multicamLocked())return;
+  cameraMenuScope=scope||$('multicamList');
+  const menu=$('multicamMenu');menu.hidden=false;updateMulticamButtons();
+  const scale=window.BlitzUIScale||1,r=menu.getBoundingClientRect();
+  menu.style.left=Math.max(4,Math.min(x,window.innerWidth-r.width-6))/scale+'px';
+  menu.style.top=Math.max(4,Math.min(y,window.innerHeight-r.height-6))/scale+'px';
+  menu.querySelector('button:not(:disabled)')?.focus();
+}
+async function cameraMenuAction(name){
+  closeCameraMenu(true);
+  if(name==='copy'||name==='cut'){
+    cameraClipboardRequested=true;
+    try{if(!document.execCommand(name))notify('剪贴板不可用，请按 Ctrl+'+(name==='cut'?'X':'C')+' 重试。',true);}
+    finally{cameraClipboardRequested=false;}
+  }else if(name==='paste'){
+    try{
+      let payload=cameraClipboard;
+      if(navigator.clipboard?.readText){
+        let text=null;try{text=await navigator.clipboard.readText();}catch(error){if(!payload)throw error;}
+        if(text!==null)payload=parseCameraClipboard(text);
+      }
+      await pasteCamera(payload);
+    }catch{notify('剪贴板中没有有效机位，请先复制机位。',true);}
+  }else if(name==='delete')removeCamera(true);
+  else if(name==='rename')startCameraRename(cameraMenuScope);
+}
+function newCamera(){
+  editMulticam(()=>recordCameraEdit('新建机位',()=>{
+    const rows=state.multicam.cameras;if(rows.length>=MAX_CAMERAS)return;
+    let n=1;while(rows.some(c=>c.name==='机位 '+String(n).padStart(2,'0')))n++;
+    const camera={id:multicamId(),name:'机位 '+String(n).padStart(2,'0'),slot:freeCameraSlot(),camera_tracks:emptyCameraTracks(),keyframes:[],
+      ...cameraSettings(),replay_speed:{mode:'fixed',rate:1,camera_clock:isCameraOnly()?'shooting':'replay',interpolation:'smooth',keyframes:[{progress:0,rate:1},{progress:1,rate:1}]}};
+    rows.push(camera);state.multicam.active_camera_id=camera.id;loadMulticamCamera();focusCamera();
+  }));
+}
+function duplicateCurrentCamera(){
+  editMulticam(()=>recordCameraEdit('复制机位',()=>{
+    const rows=state.multicam.cameras,current=currentCamera();
+    if(!current||rows.length>=MAX_CAMERAS)return;
+    const camera={...copy(current),id:multicamId(),name:duplicateCameraName(current.name),slot:freeCameraSlot()};
+    rows.splice(rows.indexOf(current)+1,0,camera);
+    state.multicam.active_camera_id=camera.id;loadMulticamCamera();focusCamera();
+  }));
+}
+function closeCameraNewMenu(){
+  $('multicamNewMenu').hidden=true;
+  cameraNewTrigger?.setAttribute('aria-expanded','false');cameraNewTrigger=null;
+}
+function showCameraNewMenu(trigger){
+  if(cameraNewTrigger===trigger){closeCameraNewMenu();return;}
+  closeCameraNewMenu();cameraNewTrigger=trigger;
+  const menu=$('multicamNewMenu');menu.hidden=false;updateMulticamButtons();
+  trigger.setAttribute('aria-expanded','true');
+  const rect=trigger.getBoundingClientRect(),gap=8,scale=window.BlitzUIScale||1;
+  menu.style.left=Math.max(gap,Math.min(rect.right/scale-menu.offsetWidth,innerWidth/scale-menu.offsetWidth-gap))+'px';
+  menu.style.top=Math.max(gap,rect.bottom/scale+menu.offsetHeight+gap<=innerHeight/scale?rect.bottom/scale+4:rect.top/scale-menu.offsetHeight-4)+'px';
+  menu.querySelector('button:not(:disabled)')?.focus();
+}
+$('tabProject').onclick=()=>showWorkspaceTab('Project');
+$('tabMulticam').onclick=()=>showWorkspaceTab('Multicam');
+$('multicamNew').onclick=newCamera;
+$('multicamNewMore').onclick=()=>{
+  if(cameraNewMenuSuppressed){cameraNewMenuSuppressed=false;return;}
+  showCameraNewMenu($('multicamNewMore'));
+};
+$('multicamNewMenu').onclick=e=>{
+  const button=e.target.closest('[data-camera-new]');if(!button||button.disabled)return;
+  closeCameraNewMenu();
+  if(button.dataset.cameraNew==='duplicate')duplicateCurrentCamera();else newCamera();
+};
+$('multicamNewMenu').onkeydown=e=>{
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();const trigger=cameraNewTrigger;closeCameraNewMenu();trigger?.focus();return;}
+  if(['ArrowUp','ArrowDown','Home','End'].includes(e.key)){
+    e.preventDefault();const buttons=[...$('multicamNewMenu').querySelectorAll('button:not(:disabled)')],i=buttons.indexOf(document.activeElement);
+    buttons[e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();
+  }
+  if(e.key==='Tab')closeCameraNewMenu();
+};
+$('multicamList').onclick=e=>{
+  if(suppressCameraClick){suppressCameraClick=false;return;}
+  if(e.target.closest('.camera-rename'))return;
+  const more=e.target.closest('.camera-more');
+  if(more&&!more.disabled){
+    const r=more.getBoundingClientRect(),item=more.closest('[data-camera-id]');
+    if(item&&cameraMenuSuppressedId===item.dataset.cameraId){cameraMenuSuppressedId=null;return;}
+    if(item){selectCamera(item.dataset.cameraId);cameraMenuMoreId=item.dataset.cameraId;}
+    showCameraMenu(r.left,r.bottom+2,$('multicamList'));
+    return;
+  }
+  const item=e.target.closest('[data-camera-id]');
+  if(item&&!cameraItemDisabled(item)){selectCamera(item.dataset.cameraId);focusCamera();}
+};
+$('multicamList').oncontextmenu=e=>{
+  e.preventDefault();const item=e.target.closest('[data-camera-id]');
+  if(item&&!cameraItemDisabled(item))selectCamera(item.dataset.cameraId);
+  showCameraMenu(e.clientX,e.clientY,$('multicamList'));
+};
+$('multicamList').ondblclick=e=>{
+  const item=e.target.closest('[data-camera-id]');
+  if(!item||cameraItemDisabled(item)||e.target.closest('.camera-more'))return;
+  if(item.dataset.cameraId!==currentCamera()?.id)selectCamera(item.dataset.cameraId);
+  startCameraRename($('multicamList'));
+};
+$('multicamList').onkeydown=e=>{
+  if(e.target.closest('input'))return;
+  if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){e.preventDefault();e.stopPropagation();const r=e.target.getBoundingClientRect();showCameraMenu(r.left,r.bottom,$('multicamList'));}
+  if(e.key==='F2'){e.preventDefault();e.stopPropagation();startCameraRename($('multicamList'));}
+  if(e.key==='Delete'){e.preventDefault();e.stopPropagation();removeCamera(true);}
+  if((e.key==='Enter'||e.key===' ')&&e.target.dataset?.cameraId){e.preventDefault();e.stopPropagation();selectCamera(e.target.dataset.cameraId);}
+  if(['ArrowUp','ArrowDown','Home','End'].includes(e.key)){
+    e.preventDefault();e.stopPropagation();const rows=state.multicam.cameras,index=rows.indexOf(currentCamera()),next=e.key==='Home'?0:e.key==='End'?rows.length-1:Math.max(0,Math.min(rows.length-1,index+(e.key==='ArrowDown'?1:-1)));
+    if(rows[next]){selectCamera(rows[next].id);focusCamera();}
+  }
+};
+$('multicamList').addEventListener('pointerdown',e=>{
+  const item=e.target.closest('[data-camera-id]');
+  if(e.button!==0||!item||e.target.closest('.camera-more,input')||cameraItemDisabled(item))return;
+  cameraDrag={id:item.dataset.cameraId,y:e.clientY,active:false,pointer:e.pointerId,insert:null};
+});
+$('multicamList').addEventListener('pointermove',e=>{
+  if(!cameraDrag)return;
+  if(!cameraDrag.active){
+    if(Math.abs(e.clientY-cameraDrag.y)<5)return;
+    if(multicamLocked()){cameraDrag=null;return;}
+    cameraDrag.active=true;$('multicamList').setPointerCapture(cameraDrag.pointer);
+  }
+  const items=[...$('multicamList').querySelectorAll('[data-camera-id]')];
+  let insert=items.length;
+  for(let i=0;i<items.length;i++){const r=items[i].getBoundingClientRect();if(e.clientY<r.top+r.height/2){insert=i;break;}}
+  if(insert!==cameraDrag.insert){
+    cameraDrag.insert=insert;
+    items.forEach((el,i)=>{el.classList.toggle('drop-before',i===insert);el.classList.toggle('drop-after',insert===items.length&&i===items.length-1);});
+  }
+});
+const endCameraDrag=cancelled=>{
+  if(!cameraDrag)return;
+  const drag=cameraDrag;cameraDrag=null;
+  $('multicamList').querySelectorAll('[data-camera-id]').forEach(el=>el.classList.remove('drop-before','drop-after'));
+  if(!drag.active)return;
+  suppressCameraClick=true;
+  if(cancelled||multicamLocked())return;
+  const rows=state.multicam.cameras,from=rows.findIndex(c=>c.id===drag.id);
+  let to=Math.min(drag.insert??from,rows.length);
+  if(from<0||to===from||to===from+1)return;
+  recordCameraEdit('机位排序',()=>{const[moved]=rows.splice(from,1);rows.splice(to>from?to-1:to,0,moved);});
+  renderMulticam();setDirty(true);focusCamera();
+};
+$('multicamList').addEventListener('pointerup',()=>endCameraDrag(false));
+$('multicamList').addEventListener('pointercancel',()=>endCameraDrag(true));
+$('multicamList').addEventListener('lostpointercapture',()=>{if(cameraDrag?.active)endCameraDrag(true);});
+$('multicamStrip').onclick=e=>{
+  if(e.target.closest('.camera-rename'))return;
+  const add=e.target.closest('[data-camera-add]');
+  if(add&&!add.disabled){newCamera();return;}
+  const caret=e.target.closest('[data-camera-add-more]');
+  if(caret&&!caret.disabled){
+    if(cameraNewMenuSuppressed){cameraNewMenuSuppressed=false;return;}
+    showCameraNewMenu(caret);return;
+  }
+  const chip=e.target.closest('[data-camera-id]');
+  if(chip&&!cameraItemDisabled(chip))selectCamera(chip.dataset.cameraId);
+};
+$('multicamStrip').oncontextmenu=e=>{
+  const chip=e.target.closest('[data-camera-id]');
+  if(chip){e.preventDefault();if(!cameraItemDisabled(chip))selectCamera(chip.dataset.cameraId);showCameraMenu(e.clientX,e.clientY,$('multicamStrip'));}
+};
+$('multicamStrip').ondblclick=e=>{
+  const chip=e.target.closest('[data-camera-id]');
+  if(!chip||cameraItemDisabled(chip))return;
+  if(chip.dataset.cameraId!==currentCamera()?.id)selectCamera(chip.dataset.cameraId);
+  startCameraRename($('multicamStrip'));
+};
+$('multicamStrip').onkeydown=e=>{
+  if(e.target.closest('input'))return;
+  const chip=e.target.closest('[data-camera-id]');
+  if(!chip)return;
+  if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();selectCamera(chip.dataset.cameraId);}
+  if(e.key==='F2'){e.preventDefault();e.stopPropagation();startCameraRename($('multicamStrip'));}
+  if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){e.preventDefault();e.stopPropagation();const r=chip.getBoundingClientRect();showCameraMenu(r.left,r.bottom,$('multicamStrip'));}
+  if(['ArrowLeft','ArrowRight'].includes(e.key)){
+    e.preventDefault();e.stopPropagation();
+    const rows=state.multicam.cameras,index=rows.findIndex(c=>c.id===chip.dataset.cameraId),next=rows[index+(e.key==='ArrowRight'?1:-1)];
+    if(next){selectCamera(next.id);$('multicamStrip').querySelector('[aria-selected=true]')?.focus({preventScroll:true});}
+  }
+};
+$('multicamMenu').onclick=e=>{const button=e.target.closest('[data-camera-action]');if(button&&!button.disabled)cameraMenuAction(button.dataset.cameraAction);};
+$('multicamMenu').onkeydown=e=>{
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeCameraMenu(true);}
+  if(['ArrowUp','ArrowDown','Home','End'].includes(e.key)){
+    e.preventDefault();const buttons=[...$('multicamMenu').querySelectorAll('button:not(:disabled)')],i=buttons.indexOf(document.activeElement);
+    buttons[e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();
+  }
+  if(e.key==='Tab')closeCameraMenu();
+};
+document.addEventListener('pointerdown',e=>{
+  cameraNewMenuSuppressed=false;cameraMenuSuppressedId=null;
+  if(!e.target.closest('#multicamNewMenu')){
+    if(!$('multicamNewMenu').hidden&&e.target.closest('#multicamNewMore,[data-camera-add-more]'))cameraNewMenuSuppressed=true;
+    closeCameraNewMenu();
+  }
+  if(!e.target.closest('#multicamMenu')){
+    const item=e.target.closest('.camera-more')?.closest('[data-camera-id]');
+    if(!$('multicamMenu').hidden&&item&&cameraMenuMoreId===item.dataset.cameraId)cameraMenuSuppressedId=item.dataset.cameraId;
+    closeCameraMenu();
+  }
+});
+document.addEventListener('copy',e=>cameraCopy(e));
+document.addEventListener('cut',e=>cameraCopy(e,true));
+document.addEventListener('paste',e=>{
+  if(e.defaultPrevented||!cameraClipboardScope(e))return;
+  const text=e.clipboardData?.getData(cameraClipboardType)||e.clipboardData?.getData('text/plain')||'';
+  if(!text.startsWith(cameraClipboardPrefix)&&!e.clipboardData?.getData(cameraClipboardType))return;
+  e.preventDefault();
+  try{pasteCamera(parseCameraClipboard(text));}catch(error){notify(error.message,true);}
+});
 function setRateOption(rate){
   $("replayFixedRate").value=String(rate);
   if(!$("replayFixedRate").value){$("replayFixedRate").add(new Option(`${rate}×`,String(rate)));$("replayFixedRate").value=String(rate);}
@@ -167,19 +677,21 @@ function updateButtons() {
   const hasCamera = !!state.sample?.camera;
   const paused = state.sample?.replay?.paused === true;
   const captureGuard=keyframeGuardFor(),captureBlocked=captureGuard.enabled&&(captureGuard.start_sec===null||state.sample?.replay?.time<captureGuard.start_sec-1e-6);
-  $("captureButton").disabled = editing || !connected || !hasCamera || !paused || !state.serviceReady || captureBlocked;
+  $("captureButton").disabled = editing || !currentCamera() || !connected || !hasCamera || !paused || !state.serviceReady || captureBlocked;
   $("newPathButton").disabled = $("captureButton").disabled;
   $("saveButton").disabled = editing || !state.dirty || !state.serviceReady;
-  sequenceEditor?.lock(editing);
+  sequenceEditor?.lock(editing||!currentCamera());
+  syncBeatControls();
   const locateButton=document.querySelector('[data-action=locate]');
   if(locateButton)locateButton.disabled=editing||!connected||!hasCamera||!paused||!state.serviceReady||isCameraOnly()||!state.timeline;
-  $("addKeyframeButton").disabled = editing;
+  $("addKeyframeButton").disabled = editing||!currentCamera();
   $("importButton").disabled = editing || !state.serviceReady;
   $("exportButton").disabled = state.busy || !state.project || !state.serviceReady;
   $("reloadProjectButton").disabled = state.busy;
   document.querySelectorAll(".trajectory-settings select, [name=shootingMode], #captureTime, #replaceExisting")
     .forEach(element => { element.disabled = editing; });
-  const canPrepare = !editing && connected && hasCamera && state.serviceReady && state.controls.length >= 2;
+  const playbackKeys=new Set(Object.values(state.tracks||{}).flat().map(k=>k.time_sec)).size;
+  const canPrepare = !editing && connected && hasCamera && state.serviceReady && playbackKeys >= 2;
   const canPlay = canPrepare && (isCameraOnly() ? paused : !!state.timeline);
   $("liveForward").disabled = !canPlay;
   const now=state.sample?.replay?.time,timeline=state.timeline;
@@ -193,7 +705,7 @@ function updateButtons() {
   setIcon($("livePause"), pausedLive ? "i-play" : "i-pause");
   $("livePause").title = pausedLive ? "继续联动" : "暂停联动";
   $("livePause").setAttribute("aria-label", $("livePause").title);
-  document.querySelectorAll(".replay-speed-panel input, .replay-speed-panel select, #resetReplaySpeed, #speedPreset, #timelineSpeedPreset, #addSpeedFrame, #speedRows button").forEach(el=>el.disabled=editing);
+  document.querySelectorAll(".replay-speed-panel input, .replay-speed-panel select, #resetReplaySpeed, #addSpeedFrame, #speedRows button").forEach(el=>el.disabled=editing);
   speedCurveEditor?.refresh();
   const sceneReady=!isCameraOnly()&&replayPreviewPane?.status==='ready';
   $("playButton").disabled = state.samples.length < 2&&!sceneReady;
@@ -201,6 +713,7 @@ function updateButtons() {
   replayPreviewPane?.syncFlightUI();
   updateSettingsControls();
   updateHomeControls();
+  updateMulticamButtons();
   if (!connected || !hasCamera) $("captureButton").title = "连接客户端并暂停本地回放后可用。";
   else if (!paused) $("captureButton").title = "请先在游戏中暂停回放，以记录当前摄像机属性。";
   else if(captureBlocked)$("captureButton").title=captureGuard.message;
@@ -308,10 +821,11 @@ function setDirty(dirty) {
 
 function loadProject(data) {
   const switched=state.projectPath!==data.project_path;
+  const previousCamera=currentCamera()?.id;
   if(!data.project){
     stopPlayback();clearTimeout(autoSaveTimer);clearTimeout(draftTimer);state.previewSequence++;
     state.projectPath=null;state.project=null;state.projectHash='null';state.pendingProject=null;
-    state.controls=[];state.savedControls=[];state.tracks=null;state.timeline=null;state.samples=[];
+    state.controls=[];state.savedControls=[];state.tracks=null;state.timeline=null;state.samples=[];state.multicam=null;state.cameraHistory.clear();cameraSamplesCache.clear();ghostCache.clear();state.cameraUndo.length=state.cameraRedo.length=0;renderMulticam();
     state.loaded=true;state.previewTime=0;pendingEditorRestore=null;pendingPreviewRestore=null;
     sequenceEditor.doc=null;sequenceEditor.selected.clear();replayPreviewPane?.clear();
     $('projectName').textContent='未打开项目';$('externalChange').hidden=true;
@@ -319,6 +833,7 @@ function loadProject(data) {
   }
   state.projectPath=data.project_path;
   if(switched){
+    state.cameraHistory.clear();cameraSamplesCache.clear();ghostCache.clear();state.cameraUndo.length=state.cameraRedo.length=0;showWorkspaceTab('Project');
     speedCurveEditor?.resetView();
     state.appliedLaunchId=data.replay_launch?.state==='launched'?data.replay_launch.id:null;
     const saved=BlitzEditorSession.newest(data.editor_state,BlitzEditorSession.readLocal(localStorage,state.projectPath));
@@ -326,14 +841,18 @@ function loadProject(data) {
     state.previewTime=Number.isFinite(saved?.timeline?.playhead)?Math.max(0,saved.timeline.playhead):0;
   }
   state.project = data.project || null;
+  state.beatGrid={...BlitzBeatGrid.defaults(),...data.project?.beat_grid};
   $("projectName").textContent = data.project_name || "未命名项目";
   state.projectHash = JSON.stringify(data.project || null);
   state.controls = copy(data.keyframe_controls || []);
   state.tracks = copy(data.camera_track_controls || tracksFromFrames(state.controls));
   state.shootingMode=data.project?.shooting_mode || (data.project?.replay_timeline?"replay":"camera_only");
   const end=Math.max(1,...Object.values(state.tracks).flat().map(k=>k.time_sec));
-  const first=Math.max(0,Math.min(...Object.values(state.tracks).flat().map(k=>k.time_sec)));
+  const times=Object.values(state.tracks).flat().map(k=>k.time_sec);
+  const first=times.length?Math.max(0,Math.min(...times)):0;
   state.timeline=copy(data.project?.replay_timeline || {time_basis:'replay',duration_sec:Math.max(end,first+.5),work_start_sec:first,work_end_sec:Math.max(end,first+.5)});
+  state.multicam=data.project?.multicam?copy(data.project.multicam):initialMulticam();
+  ensureCameraSlots();
   $("replayFilePath").value=state.timeline.replay_file||'';
   const seqSource=$("sequenceEditor").querySelector('[data-source]');
   seqSource.textContent=seqSource.title=data.project?.replay_timeline?.replay_file?'已保存的整场回放时间轴':'全片长度待确认：读取回放文件以取得全片长度。';
@@ -358,7 +877,10 @@ function loadProject(data) {
   const frames=state.controls;
   $("captureTime").value = isCameraOnly()?0:state.sample?.replay?.time??first;
   $("captureTime").readOnly=!isCameraOnly();
-  sequenceEditor?.load(state.tracks,speedSettings(),!switched||state.savingTimeline,state.timeline,state.shootingMode);
+  const sameCamera=previousCamera===currentCamera()?.id;
+  if(!sameCamera)state.cameraHistory.clear();
+  sequenceEditor?.load(state.tracks,speedSettings(),!switched&&sameCamera,state.timeline,state.shootingMode);
+  renderMulticam();
   updateModeUI();setDirty(false);
   updateKeyframeCount();
   updateTimingExplanation();
@@ -446,7 +968,7 @@ function queueAutoSave(){
   clearTimeout(autoSaveTimer);
   autoSaveTimer=setTimeout(()=>autoSaveDraft(),1500);
 }
-function editorInteracting(){return !!(sequenceEditor?.drag||sequenceEditor?.numberEdit||speedCurveEditor?.drag);}
+function editorInteracting(){return !!(sequenceEditor?.drag||sequenceEditor?.numberEdit||speedCurveEditor?.drag||beatEditOriginal);}
 async function autoSaveDraft(){
   if(!state.loaded||!state.dirty||state.busy||state.playback.active||!state.serviceReady||state.pendingProject||editorInteracting()){if(state.dirty)queueAutoSave();return;}
   if(autoSavePromise){queueAutoSave();return autoSavePromise;}
@@ -474,7 +996,7 @@ function captureEditorSession(){
   const preview=state.shootingMode==='replay'?(BlitzEditorSession.capturePreview(replayPreviewPane)||pendingPreviewRestore):null;
   return {schema_version:1,timeline:BlitzEditorSession.captureTimeline(sequenceEditor,state.previewTime),
     path_view:{view:state.view,yaw:state.yaw,elevation:state.elevation,zoom:state.zoom,pan:[...state.pan]},
-    preview,inspector:Object.keys(TAB_PANES).find(n=>$('tab'+n).classList.contains('active'))||'Camera',splits:{v:splitV,h:splitH}};
+    preview,inspector:Object.keys(TAB_PANES).find(n=>$('tab'+n).classList.contains('active'))||'Camera',workspace_tab:state.workspaceTab,splits:{v:splitV,h:splitH}};
 }
 function restorePreviewSession(){if(!pendingEditorRestore&&pendingPreviewRestore&&BlitzEditorSession.restorePreview(replayPreviewPane,pendingPreviewRestore))pendingPreviewRestore=null;}
 function restoreEditorSession(){
@@ -485,6 +1007,7 @@ function restoreEditorSession(){
   const v=saved.path_view;
   if(v&&['3d','xy','xz','yz'].includes(v.view)&&[v.yaw,v.elevation,v.zoom,...(v.pan||[])].every(Number.isFinite)&&v.pan?.length===2){state.view=v.view;state.yaw=v.yaw;state.elevation=v.elevation;state.zoom=Math.max(.08,Math.min(40,v.zoom));state.pan=[...v.pan];document.querySelectorAll('.view-button[data-view]').forEach(b=>{const active=b.dataset.view===state.view;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});}
   if(TAB_PANES[saved.inspector]&&(!isCameraOnly()||saved.inspector!=='Speed'))showTab(saved.inspector);
+  showWorkspaceTab(saved.workspace_tab);
   updateTimeline();drawCanvas();restorePreviewSession();
 }
 async function persistEditorSession(keepalive=false,withDraft=false){
@@ -536,6 +1059,7 @@ async function refreshPreview() {
 
 function setSamples(samples, metadata) {
   state.samples = samples;
+  const cid=currentCamera()?.id;if(cid)cameraSamplesCache.set(cid,{samples,metadata});
   const start = samples[0]?.time_sec ?? 0;
   const end = samples.at(-1)?.time_sec ?? start;
   // Saving/re-sampling a path must not seek the editor's playhead.
@@ -565,7 +1089,7 @@ function stopPlayback() {
 }
 function seek(time) {
   stopPlayback();
-  if (!state.samples.length&&!replayPreviewPane?.sampler) return;
+  if (!state.project) return;
   state.previewTime = isCameraOnly()?Math.max(0,time):Math.max(0,Math.min(state.timeline?.duration_sec??state.samples.at(-1)?.time_sec??1,time));
   if(isCameraOnly()){$("captureTime").value=state.previewTime.toFixed(6);updatePreviewRange();}
   updateTimeline(); drawCanvas();
@@ -714,12 +1238,38 @@ function drawAxes() {
     ctx.fillStyle = color; ctx.fillText(name, end[0] + p[0] * 7, end[1] + p[1] * 7 + 3);
   });
 }
+function cameraGhostPoints(camera){
+  if(!curveMath)return null;
+  const tracks=camera.camera_tracks;
+  const cached=ghostCache.get(camera.id);
+  if(cached?.tracks===tracks&&cached.easing===camera.easing&&cached.interp===camera.position_interpolation)return cached.points;
+  const smooth=camera.position_interpolation!=='linear';
+  const rows=['x','y','z'].map(name=>tracks?.[name]||[]);
+  const times=rows.flat().map(k=>k.time_sec),points=[];
+  if(times.length){
+    const evals=rows.map(r=>curveMath.scalarTrack(r,smooth,camera.easing||'linear'));
+    const lo=Math.min(...times),hi=Math.max(...times),n=Math.max(2,Math.min(240,Math.ceil((hi-lo)*30)||2));
+    for(let i=0;i<=n;i++){const p=evals.map(f=>f(lo+(hi-lo)*i/n));if(p.every(Number.isFinite))points.push(p);}
+  }
+  ghostCache.set(camera.id,{tracks,easing:camera.easing,interp:camera.position_interpolation,points});
+  return points;
+}
+function cameraGhosts(){
+  const active=currentCamera()?.id;
+  return (state.multicam?.cameras||[]).filter(c=>c.id!==active)
+    .map(c=>({color:cameraColor(c),points:cameraGhostPoints(c)})).filter(g=>g.points?.length>=2);
+}
 function drawCanvas() {
   syncReplayPreview();
   if (!ctx) return;
   ctx.clearRect(0, 0, state.canvasWidth, state.canvasHeight);
   drawGrid();
   drawAxes();
+  if (state.ghostPaths) for (const g of cameraGhosts()) {
+    ctx.beginPath(); g.points.forEach((p, i) => { const q = project(p); if (!i) ctx.moveTo(...q); else ctx.lineTo(...q); });
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.strokeStyle = g.color + "59"; ctx.lineWidth = 0.9; ctx.stroke();
+  }
   if (!state.samples.length) return;
   const current = nearestSample(state.previewTime);
   function drawPath(samples, color, width) {
@@ -810,6 +1360,11 @@ $("timelineSlider").addEventListener("input", event => seek(Number(event.target.
 $("previewSpeed").addEventListener("change", () => { if (state.playing) { state.playbackStart = state.previewTime; state.playbackAnchor = performance.now(); } });
 $("loopButton").addEventListener("click", () => { state.loop = !state.loop; $("loopButton").setAttribute("aria-pressed", String(state.loop)); });
 $("fitButton").addEventListener("click", () => fitView());
+$("ghostToggle").addEventListener("click", () => {
+  state.ghostPaths=!state.ghostPaths;
+  $("ghostToggle").setAttribute("aria-pressed", String(state.ghostPaths));
+  drawCanvas();
+});
 document.querySelectorAll(".view-button[data-view]").forEach(button => button.addEventListener("click", () => {
   state.view = button.dataset.view;
   document.querySelectorAll(".view-button[data-view]").forEach(b => { b.classList.toggle("active", b === button); b.setAttribute("aria-pressed", String(b === button)); });
@@ -844,12 +1399,17 @@ document.addEventListener("keydown", event => {
   }
   const k=event.key.toLowerCase();
   const textEntry=event.target.closest('input,textarea,[contenteditable=true]');
-  if((event.ctrlKey||event.metaKey)&&['z','y'].includes(k)&&(!textEntry||event.target.closest('#paneSpeed,#keyInspector,.ce-grid2,#easeContinuous'))){
+  if((event.ctrlKey||event.metaKey)&&['z','y'].includes(k)&&(!textEntry||event.target.closest('#paneSpeed,#paneBeat,#keyInspector,.ce-grid2,#easeContinuous'))){
     event.preventDefault();
     if(k==='z'&&!event.shiftKey&&window.BlitzNumbers?.active){BlitzNumbers.finish(true,true);return;}
     window.BlitzNumbers?.finish();finishEaseDrag?.(false);if(textEntry)event.target.blur();stopPlayback();sequenceEditor?.action(k==='y'||event.shiftKey?'redo':'undo');return;
   }
   if (event.target.closest('input,select,textarea,[contenteditable=true]')||state.home) return;
+  if(event.altKey&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&/^Digit[1-9]$/.test(event.code)){
+    const i=Number(event.code[5])-1,rows=state.multicam?.cameras||[];
+    if(rows[i]){event.preventDefault();selectCamera(rows[i].id);}
+    return;
+  }
   if(inputControls.matches('enterFlight',event)){event.preventDefault();if(!event.repeat)replayPreviewPane?.startFlight();return;}
   if(inputControls.matches('recordPreview',event)){event.preventDefault();if(!event.repeat)replayPreviewPane?.record();return;}
   if(inputControls.matches('snap',event)&&!event.repeat){event.preventDefault();sequenceEditor?.action('snap');return;}
@@ -884,7 +1444,7 @@ const EASE_BUILTINS=[
   ["圆入",[.55,0,1,.55]],["圆出",[0,.55,.45,1]],["圆",[.85,0,.15,1]],
 ];
 const easeState={ctrl:[.42,0,.58,1],mixed:false,automatic:false};
-let curveMath=null;import("/curve-core.js").then(m=>{curveMath=m;drawEaseGraph();renderPresetGrid();});
+let curveMath=null;import("/curve-core.js").then(m=>{curveMath=m;drawEaseGraph();renderPresetGrid();drawCanvas();});
 function easeTargets(){
   if(!sequenceEditor?.doc)return [];
   const out=[];
@@ -1001,6 +1561,7 @@ $("presetSave").addEventListener("click",()=>{
 }
 sequenceEditor=new BlitzTimeline.Editor($("sequenceEditor"),{
   change:applyTimelineChange, seek:time=>seek(time), error:message=>notify(message,true),
+  beatSettings:()=>state.beatGrid,onBeatRender:()=>syncBeatControls(),
   onWorkRangeDragStart:()=>stopPlayback(),
   clipboardScope:target=>!!target.closest('#paneSpeed,#paneCurve'),
   clipboardBusy:()=>!!(speedCurveEditor?.drag||state.settingsOpen||window.BlitzStartup?.active),
@@ -1012,9 +1573,84 @@ sequenceEditor=new BlitzTimeline.Editor($("sequenceEditor"),{
 speedCurveEditor=new BlitzSpeedEditor($("paneSpeed"),sequenceEditor,{
   pause:stopPlayback,draw:drawSpeedGraph,seek,locked:()=>state.busy||state.playback.active||!state.serviceReady,error:message=>notify(message,true),
 });
+// Camera operations and keyframe history share one undo order: kfCounter marks
+// every keyframe-history change, camera entries remember the counter at push time.
+function refreshUndoButtons(){
+  if(!sequenceEditor)return;
+  const undoable=!!(sequenceEditor.undoStack.length||state.cameraUndo.length),redoable=!!(sequenceEditor.redoStack.length||state.cameraRedo.length);
+  const undo=sequenceEditor.root.querySelector('[data-action=undo]'),redo=sequenceEditor.root.querySelector('[data-action=redo]');
+  if(undo)undo.disabled=sequenceEditor.locked||!undoable;
+  if(redo)redo.disabled=sequenceEditor.locked||!redoable;
+  if(!speedCurveEditor)return;
+  const pane=$('paneSpeed');
+  const su=pane.querySelector('[data-speed-action=undo]'),sr=pane.querySelector('[data-speed-action=redo]');
+  if(su)su.disabled=speedCurveEditor.locked()||!undoable;
+  if(sr)sr.disabled=speedCurveEditor.locked()||!redoable;
+}
+{
+  const rawCommit=sequenceEditor.commit.bind(sequenceEditor);
+  sequenceEditor.commit=before=>{
+    const top=sequenceEditor.undoStack.at(-1);
+    rawCommit(before);
+    if(sequenceEditor.undoStack.at(-1)!==top){kfCounter++;state.cameraRedo.length=0;}
+  };
+  const rawAction=sequenceEditor.action.bind(sequenceEditor);
+  sequenceEditor.action=name=>{
+    if(name==='undo'&&undoableCamera()){
+      const entry=state.cameraUndo.pop();state.cameraRedo.push(entry);
+      cameraHistoryStep(entry,'before');notify(`已撤销：${entry.label}`);return;
+    }
+    if(name==='redo'&&redoableCamera()){
+      const entry=state.cameraRedo.pop();state.cameraUndo.push(entry);
+      cameraHistoryStep(entry,'after');notify(`已重做：${entry.label}`);return;
+    }
+    if(name==='undo'||name==='redo'){
+      const stack=name==='undo'?sequenceEditor.undoStack:sequenceEditor.redoStack,top=stack.at(-1);
+      rawAction(name);
+      // kfCounter is a position in keyframe history, so camera entries re-match
+      // once later keyframe changes are undone.
+      if(stack.at(-1)!==top)kfCounter+=name==='undo'?-1:1;
+      return;
+    }
+    return rawAction(name);
+  };
+  const rawRender=sequenceEditor.render.bind(sequenceEditor);
+  sequenceEditor.render=()=>{rawRender();refreshUndoButtons();};
+  const rawRefresh=speedCurveEditor.refresh.bind(speedCurveEditor);
+  speedCurveEditor.refresh=()=>{rawRefresh();refreshUndoButtons();};
+}
 const projectNumber=input=>input.closest('#keyInspector,#paneSpeed,.ce-grid2,#speedRows');
 document.addEventListener('number-start',event=>{if(projectNumber(event.target)){stopPlayback();sequenceEditor.beginNumberEdit();}});
 document.addEventListener('number-end',event=>{if(projectNumber(event.target)){sequenceEditor.endNumberEdit(event.detail.cancelled);renderSpeedRows();}});
+function beatLocked(){return state.busy||state.playback.active||!state.project||!state.serviceReady||!currentCamera()||['choosing','launching'].includes(state.replayLaunch?.state);}
+function syncBeatControls(){
+  const settings=state.beatGrid,locked=beatLocked(),disabled=locked||!settings.enabled;
+  $('beatEnabled').checked=settings.enabled;$('beatEnabled').disabled=locked;
+  for(const [id,key] of [['beatBpm','bpm'],['beatOffset','offset_sec']]){
+    const input=$(id);input.disabled=disabled;if(BlitzNumbers.active!==input)input.value=settings[key];
+  }
+  $('beatDivision').value=String(settings.division);$('beatDivision').disabled=disabled;
+  document.querySelectorAll('[data-beat-origin]').forEach(button=>{button.disabled=disabled;button.setAttribute('aria-pressed',String(button.dataset.beatOrigin===settings.origin));});
+  $('paneBeat').querySelector('.beat-settings').setAttribute('aria-disabled',String(disabled));
+  const grid=sequenceEditor?.doc&&sequenceEditor.beatGrid();
+  $('beatReadout').textContent=grid?.count?`${grid.count} 个卡点 · 首个 ${BlitzBeatGrid.timeAt(grid,grid.first).toFixed(3)} s`:settings.enabled?'工作区间内无卡点':'';
+}
+function changeBeatSettings(patch){
+  if(beatLocked())return false;
+  const before=copy(state.beatGrid);state.beatGrid={...state.beatGrid,...patch};
+  if(JSON.stringify(before)===JSON.stringify(state.beatGrid))return true;
+  stopPlayback();sequenceEditor.render();syncBeatControls();setDirty(true);
+  if(!beatEditOriginal)pushCameraHistory('卡点设置',{beat_grid:before},{beat_grid:copy(state.beatGrid)});
+  return true;
+}
+for(const [id,key] of [['beatBpm','bpm'],['beatOffset','offset_sec']])BlitzNumbers.configure($(id),{
+  get:()=>state.beatGrid[key],set:value=>changeBeatSettings({[key]:value}),
+});
+$('paneBeat').addEventListener('number-start',()=>{stopPlayback();beatEditOriginal=copy(state.beatGrid);});
+$('paneBeat').addEventListener('number-end',event=>{const before=beatEditOriginal;beatEditOriginal=null;if(before){if(event.detail.cancelled){state.beatGrid=before;sequenceEditor.render();}else pushCameraHistory('卡点设置',{beat_grid:before},{beat_grid:copy(state.beatGrid)});}syncBeatControls();if(state.dirty)queueAutoSave();});
+$('beatEnabled').addEventListener('change',e=>changeBeatSettings({enabled:e.target.checked}));
+$('beatDivision').addEventListener('change',e=>changeBeatSettings({division:Number(e.target.value)}));
+document.querySelectorAll('[data-beat-origin]').forEach(button=>button.addEventListener('click',()=>changeBeatSettings({origin:button.dataset.beatOrigin,...(button.dataset.beatOrigin==='playhead'?{anchor_sec:state.previewTime}:{})})));
 $("readReplayFile").onclick=async()=>{let info;await action(async()=>{info=await api('/api/replay/timeline',{path:$("replayFilePath").value.trim()});});if(info)applyReplayInfo(info);};
 async function selectProjectReplay(){
   if($("openReplayButton").disabled)return;
@@ -1116,13 +1752,11 @@ $("replayFixedRate").addEventListener("change",()=>{stopPlayback();state.rateMod
 function changeSpeedInterpolation(value){const s=speedSettings();s.interpolation=value;s.keyframes.forEach(k=>delete k.ease);stopPlayback();sequenceEditor.changeSpeed(s);}
 $("speedInterpolation").addEventListener("change",()=>changeSpeedInterpolation($("speedInterpolation").value));
 $("timelineRateInterpolation").addEventListener('change',()=>changeSpeedInterpolation($("timelineRateInterpolation").value));
-$("timelineSpeedPreset").onclick=()=>$("speedPreset").click();
 $("resetReplaySpeed").onclick=()=>sequenceEditor.action('reset-speed');
-$("speedPreset").addEventListener("click",()=>{state.rateMode="curve";state.speedRange=null;state.speedFrames=[{progress:0,rate:1},{progress:.25,rate:.25},{progress:.75,rate:.25},{progress:1,rate:1}];sequenceEditor.changeSpeed(speedSettings());});
 $("addSpeedFrame").addEventListener("click",()=>sequenceEditor.add('rate'));
 
 function isCameraOnly(){return state.shootingMode==='camera_only';}
-const TAB_PANES={Camera:"paneCamera",Speed:"paneSpeed",Curve:"paneCurve"};
+const TAB_PANES={Camera:"paneCamera",Speed:"paneSpeed",Curve:"paneCurve",Beat:"paneBeat"};
 function showTab(name){
   for(const [n,pane] of Object.entries(TAB_PANES)){
     const on=n===name;
@@ -1291,18 +1925,18 @@ function paintHome() {
   const byName=(a,b)=>a.name.localeCompare(b.name,'zh',{numeric:true})||a.path.localeCompare(b.path);
   const opened=item=>Date.parse(item.last_opened)||0;
   rows.sort((a,b)=>sort==='name-asc'?byName(a,b):sort==='name-desc'?-byName(a,b):
-    sort==='size'?((b.size_bytes??-1)-(a.size_bytes??-1)||byName(a,b)):(opened(b)-opened(a)||byName(a,b)));
+    sort==='size'?((b.size_bytes??-1)-(a.size_bytes??-1)||byName(a,b)):(opened(b)-opened(a)||(Date.parse(b.modified_at)||0)-(Date.parse(a.modified_at)||0)||byName(a,b)));
   const list=$('homeRows');list.replaceChildren();list.setAttribute('aria-busy',String(homeLoading));
   $('homeNavCount').textContent=homeItems.length||'';
   $('homeCount').textContent=homeLoading?'正在读取…':homeError?'读取失败':`${rows.length} 个项目`;
   $('homeEmpty').hidden=!homeLoading&&!homeError&&rows.length>0;
-  $('homeEmpty').textContent=homeLoading?'正在读取最近项目…':homeError?`读取失败：${homeError}`:
-    q?'没有找到匹配的项目':'暂无最近项目，新建或打开一个项目开始创作。';
+  $('homeEmpty').textContent=homeLoading?'正在读取项目…':homeError?`读取失败：${homeError}`:
+    q?'没有找到匹配的项目':'暂无项目，新建、打开或将项目放入设置中的项目文件夹。';
   $('homeRetry').hidden=!homeError||homeLoading;
   if(homeLoading||homeError){updateHomeControls();return;}
   const today=new Date();today.setHours(0,0,0,0);
   const groups=sort==='recent'&&!q?
-    [['今天',rows.filter(item=>opened(item)>=today.getTime())],['更早',rows.filter(item=>opened(item)<today.getTime())]]:
+    [['今天',rows.filter(item=>opened(item)>=today.getTime())],['更早',rows.filter(item=>opened(item)>0&&opened(item)<today.getTime())],['项目文件夹',rows.filter(item=>!opened(item))]]:
     [[q?'搜索结果':'全部项目',rows]];
   for(const [label,items] of groups){
     if(!items.length)continue;
@@ -1320,7 +1954,7 @@ function paintHome() {
       if(summary.context)replay.append(homeNode('span','home-replay-context',summary.context));
       copy.append(name,replay);
       const meta=homeNode('span','home-project-meta');
-      meta.append(homeNode('span','home-project-time',item.exists?relTime(item.last_opened):'文件不存在'),homeNode('span','home-project-mode',homeMode(item)));
+      meta.append(homeNode('span','home-project-time',item.exists?(item.last_opened?relTime(item.last_opened):'未打开'):'文件不存在'),homeNode('span','home-project-mode',homeMode(item)));
       button.append(icon,copy,meta);
       button.addEventListener('click',()=>switchHomeProject(()=>openProjectFlow(item.path)));
       const more=homeNode('button','home-more');more.type='button';more.append(homeIcon('i-more'));
@@ -1357,7 +1991,7 @@ function showHomeInfo(item) {
   $('homeInfoReplay').textContent=item.replay||'未关联回放';
   $('homeInfoMode').textContent=homeMode(item);
   const time=new Date(Date.parse(item.last_opened));
-  $('homeInfoTime').textContent=Number.isFinite(time.getTime())?`${time.toLocaleString('zh-CN',{hour12:false})}（${relTime(item.last_opened)}）`:'—';
+  $('homeInfoTime').textContent=Number.isFinite(time.getTime())?`${time.toLocaleString('zh-CN',{hour12:false})}（${relTime(item.last_opened)}）`:'尚未打开';
   $('homeInfoSize').textContent=item.exists?sizeText(item.size_bytes):'—';
   $('homeInfoStatus').textContent=item.exists?'可打开':'文件不存在';
   $('homeInfoDialog').showModal();
@@ -1407,6 +2041,7 @@ $("homeOpen").addEventListener('click', () => switchHomeProject(() => openProjec
 $("homeFilter").addEventListener('input', paintHome);
 $("homeSort").addEventListener('change', paintHome);
 $('homeRetry').addEventListener('click',renderHome);
+window.addEventListener('focus',()=>{if(state.home&&state.serviceReady&&!state.busy&&!homeLoading&&!homeOpening&&!state.settingsOpen&&$('homeProjectMenu').hidden&&!document.querySelector('dialog[open]'))renderHome();});
 $('homeProjectMenu').addEventListener('click',event=>{
   const button=event.target.closest('[data-home-action]'),item=homeMenuItem;
   if(!button||button.disabled||!item)return;
@@ -1549,7 +2184,7 @@ $('settingsBrowse').addEventListener('click',()=>action(async()=>{
 $('settingsForm').addEventListener('submit',event=>{
   event.preventDefault();if($('settingsSave').disabled)return;
   action(async()=>{
-    try{applicationSettings=await api('/api/settings',{project_directory:$('projectDirectory').value,replay_keyframe_start_seconds:settingsBattleStart(),ui_scale:Number($('uiScale').value)});$('projectDirectory').value=applicationSettings.project_directory;applyUIScale(applicationSettings.ui_scale);await refreshState();settingsMessage('设置已保存。');renderBattleStartStatus();}
+    try{applicationSettings=await api('/api/settings',{project_directory:$('projectDirectory').value,replay_keyframe_start_seconds:settingsBattleStart(),ui_scale:Number($('uiScale').value)});$('projectDirectory').value=applicationSettings.project_directory;applyUIScale(applicationSettings.ui_scale);await refreshState();if(state.home)await renderHome();settingsMessage('设置已保存。');renderBattleStartStatus();}
     catch(error){settingsMessage(error.message,true);}
   });
 });

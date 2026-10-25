@@ -510,6 +510,7 @@ export class ReplayPreviewPane {
     if(this.renderWidth!==w||this.renderHeight!==h){this.renderer.setSize(w,h,false);this.renderWidth=w;this.renderHeight=h;}
     const base=this.evaluate?.(this.time);this.evaluated=base;
     const pose=this.override||base;
+    if(!pose&&this.view==='camera'){this.stopFlight();this.view='observer';$('previewCamera').setAttribute('aria-pressed','false');$('previewObserver').setAttribute('aria-pressed','true');}
     if(pose){const b=cameraBasis(pose.yaw,pose.pitch,pose.roll);this.shot.position.copy(vector(worldToScene(pose.position)));const matrix=new THREE.Matrix4().makeBasis(vector(worldToScene(b.right)),vector(worldToScene(b.up)),vector(worldToScene(b.forward)).negate());this.shot.quaternion.setFromRotationMatrix(matrix);this.shot.aspect=16/9;this.shot.fov=verticalAngle(pose.zoom,16/9);this.shot.updateProjectionMatrix();this.shot.updateMatrixWorld();}
     this.orbit.enabled=this.view==='observer';this.pathGroup.visible=this.view==='observer';
     const frames=this.sampler?.at(this.time,this.offset)||[],raw=this.sampler?.rawTime(this.time,this.offset);

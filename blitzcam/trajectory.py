@@ -377,6 +377,8 @@ class Trajectory:
 
     def to_dict(self) -> dict[str, Any]:
         return {"schema_version": 1, "quaternion_order": "wxyz", "fov_axis": "horizontal",
+                **({'beat_grid': self.beat_grid} if getattr(self, 'beat_grid', None) is not None else {}),
+                **({'multicam': self.multicam} if getattr(self, 'multicam', None) else {}),
                 **({'replay_timeline': self.replay_timeline} if self.replay_timeline is not None else {}),
                 **({'shooting_mode': self.shooting_mode} if self.shooting_mode is not None else {}),
                 "timing": self.timing, "easing": self.easing,

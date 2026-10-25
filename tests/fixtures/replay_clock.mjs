@@ -25,4 +25,9 @@ assert.throws(()=>createReplaySampler(bundle));assert.throws(()=>createReplaySam
 const tracks=Object.fromEntries(['x','y','z','yaw','pitch','roll','zoom'].map(name=>[name,[{time_sec:38.262415,value:name==='zoom'?60:10}]]));
 const saved=structuredClone(tracks),camera=cameraEvaluator(tracks,false,'linear');
 assert.deepEqual(camera(38.262415).position,[10,10,10]);assert.deepEqual(tracks,saved);
+const empty=Object.fromEntries(Object.keys(tracks).map(name=>[name,[]]));
+assert.equal(cameraEvaluator(empty,true,'linear')(0),null);
+empty.x=[{time_sec:20,value:45}];
+assert.deepEqual(cameraEvaluator(empty,true,'linear')(22),{position:[45,0,0],yaw:0,pitch:0,roll:0,zoom:60});
+assert.equal(empty.zoom.length,0);
 console.log(JSON.stringify({passed:true}));

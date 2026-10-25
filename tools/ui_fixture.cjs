@@ -7,3 +7,9 @@ exports.enterFixture=async page=>{
  if(await page.evaluate(()=>document.body.dataset.appReady!=='true'))await page.locator('#startupContinue').click();
  await page.waitForFunction(()=>document.body.dataset.appReady==='true'&&!pendingEditorRestore);
 };
+
+// Seed a curve for interaction tests without depending on a production shortcut.
+exports.setSpeedCurveFixture=async page=>page.evaluate(()=>sequenceEditor.changeSpeed({
+ ...sequenceEditor.data().speed,mode:'curve',time_range:null,
+ keyframes:[{progress:0,rate:1},{progress:.25,rate:.25},{progress:.75,rate:.25},{progress:1,rate:1}],
+}));

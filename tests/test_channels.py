@@ -77,7 +77,7 @@ class IndependentTrackTests(unittest.TestCase):
         self.assertEqual(duration,8)
 
     def test_bad_channels_cannot_silently_fall_back_to_full_pose(self):
-        for change in ({'x':[]},{'pitch':[{'time_sec':0,'value':91}]},
+        for change in ({'x':None},{'pitch':[{'time_sec':0,'value':91}]},
                        {'zoom':[{'time_sec':0,'value':True}]},
                        {'x':[{'time_sec':1,'value':1},{'time_sec':1,'value':2}]}):
             data=fixture();data['camera_tracks'].update(change)

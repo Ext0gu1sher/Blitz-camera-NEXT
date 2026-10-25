@@ -1,5 +1,5 @@
 /* Replay-anchored parameter keys with a separate shooting-time rate track. */
-(function(root,factory){const common=typeof module!=="undefined"&&module.exports,api=factory(common?require('./preview-time.js'):root.BlitzPreviewTime,common?require('./keyframe-clipboard.js'):root.BlitzKeyframeClipboard);if(common)module.exports=api;else root.BlitzTimeline=api;})(typeof globalThis!=="undefined"?globalThis:this,function(Timing,Clipboard){
+(function(root,factory){const common=typeof module!=="undefined"&&module.exports,api=factory(common?require('./preview-time.js'):root.BlitzPreviewTime,common?require('./keyframe-clipboard.js'):root.BlitzKeyframeClipboard,common?require('./beat-grid.js'):root.BlitzBeatGrid);if(common)module.exports=api;else root.BlitzTimeline=api;})(typeof globalThis!=="undefined"?globalThis:this,function(Timing,Clipboard,Beats){
   "use strict";
   const CHANNELS=[['x','X','#d99589'],['y','Y','#98c889'],['z','Z','#80b6e3'],['yaw','摄像机水平角度','#b5a0e1'],['pitch','俯仰','#b5a0e1'],['roll','横滚','#b5a0e1'],['zoom','缩放','#e0b96e']];
   const clone=x=>JSON.parse(JSON.stringify(x)),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -8,7 +8,7 @@
   const pretty=t=>Number.isFinite(t)?t.toFixed(3):'—';
   const clipboardType='application/x-blitzcam-keyframes',clipboardPrefix='BlitzCamera keyframes\n';
   class ClockMap{
-    constructor(tracks,speed,timeline=null){const ts=Object.values(tracks).flat().map(k=>k.time_sec);this.start=timeline?0:Math.min(...ts);this.end=timeline?timeline.duration_sec:Math.max(...ts);this.duration=this.end-this.start;this.speed=speed;this.workStart=timeline?.work_start_sec??this.start;this.workEnd=timeline?.work_end_sec??this.end;this.workDuration=this.workEnd-this.workStart;this.workSeconds=Timing.windowDuration(this.workStart,this.workEnd,speed);this.seconds=this.duration-this.workDuration+this.workSeconds;const range=speed.mode==='curve'?speed.time_range:null;this.rateStart=range?.start_sec??this.workStart;this.rateEnd=range?.end_sec??this.workEnd;this.rateDuration=this.rateEnd-this.rateStart;this.rateSeconds=Timing.duration(this.rateDuration,speed);}
+    constructor(tracks,speed,timeline=null){const ts=Object.values(tracks).flat().map(k=>k.time_sec);this.start=timeline||!ts.length?0:Math.min(...ts);this.end=timeline?timeline.duration_sec:ts.length?Math.max(...ts):1;this.duration=this.end-this.start;this.speed=speed;this.workStart=timeline?.work_start_sec??this.start;this.workEnd=timeline?.work_end_sec??this.end;this.workDuration=this.workEnd-this.workStart;this.workSeconds=Timing.windowDuration(this.workStart,this.workEnd,speed);this.seconds=this.duration-this.workDuration+this.workSeconds;const range=speed.mode==='curve'?speed.time_range:null;this.rateStart=range?.start_sec??this.workStart;this.rateEnd=range?.end_sec??this.workEnd;this.rateDuration=this.rateEnd-this.rateStart;this.rateSeconds=Timing.duration(this.rateDuration,speed);}
     atTime(t){t=clamp(t,this.start,this.end);if(t<this.workStart)return t-this.start;if(t>this.workEnd)return this.workStart-this.start+this.workSeconds+t-this.workEnd;return this.workStart-this.start+Timing.atWindowCamera(this.workStart,this.workEnd,this.speed,t).shootingElapsed;}
     atSeconds(s){s=clamp(s,0,this.seconds);const before=this.workStart-this.start;if(s<before)return this.start+s;if(s>before+this.workSeconds)return this.workEnd+s-before-this.workSeconds;return this.workStart+Timing.atWindowShooting(this.workStart,this.workEnd,this.speed,s-before).cameraProgress*this.workDuration;}
     rateTime(p){return this.rateStart+Timing.atShooting(this.rateDuration,this.speed,p).cameraProgress*this.rateDuration;}
@@ -28,6 +28,9 @@
       root.querySelector('[data-action=copy]').insertAdjacentHTML('beforebegin',`<button data-action="cut" title="剪切选中关键帧 Ctrl+X" aria-label="剪切选中关键帧" disabled><svg class="ic"><use href="#i-cut"/></svg></button>`);
       root.querySelector('#addKeyframeButton').addEventListener('click',()=>this.add('all'));
       this.scroll=root.querySelector('.seq-scroll');this.labels=root.querySelector('.seq-labels');this.content=root.querySelector('.seq-content');this.svg=root.querySelector('.seq-svg');this.head=root.querySelector('.seq-head');
+      this.beatLabel=document.createElement('div');this.beatLabel.className='seq-beat-label';this.beatLabel.hidden=true;
+      this.beatLabel.innerHTML='<i></i><span>BPM</span><output></output>';this.labels.querySelector('.seq-ruler-label').after(this.beatLabel);
+      root.addEventListener('keydown',e=>{const beat=e.target.closest('[data-beat]');if(beat&&['Enter',' '].includes(e.key)){e.preventDefault();e.stopImmediatePropagation();this.scroll.focus({preventScroll:true});this.adapter.seek(Number(beat.dataset.beat));}});
       this.inspectorRoot=adapter.inspector||root;
       root.ownerDocument.addEventListener('copy',e=>this.onClipboardCopy(e));
       root.ownerDocument.addEventListener('cut',e=>this.onClipboardCut(e));
@@ -85,7 +88,9 @@
     }
     setMode(mode,timeline){this.edit(()=>{this.doc.mode=mode;this.doc.timeline=clone(timeline);if(mode==='replay'&&this.doc.speed.mode==='paused')this.doc.speed.mode='curve';});this.axis=mode==='camera_only'?'shooting':'replay';this.fit();}
     map(){if(this.free()){const end=Math.max(this.horizon||30,...Object.values(this.doc.tracks).flat().map(k=>k.time_sec+10));this.horizon=end;return new ClockMap(this.doc.tracks,{...this.doc.speed,mode:'paused'},{duration_sec:end,work_start_sec:0,work_end_sec:end});}return new ClockMap(this.doc.tracks,this.doc.speed,this.doc.timeline);}
-    height(){return this.free()?208:310;}
+    beatGrid(map=this.map()){return Beats?.grid(this.adapter?.beatSettings?.(),map);}
+    beatLaneHeight(){return this.adapter?.beatSettings?.()?.enabled?24:0;}
+    height(){return (this.free()?208:310)+this.beatLaneHeight();}
     grow(time){if(this.free())this.horizon=Math.max(this.horizon||30,time+Math.max(10,this.scroll.clientWidth/this.scale));}
     autoPan(e){
       this.lastPointer={clientX:e.clientX,clientY:e.clientY,altKey:e.altKey,auto:true};
@@ -119,7 +124,7 @@
       };this.autoFrame=requestAnimationFrame(frame);
     }
 
-    rows(){return [...CHANNELS.map(([name],i)=>({name,y:40+i*24,height:24,keys:this.doc.tracks[name]})),...(this.free()?[]:[{name:'rate',y:208,height:102,keys:this.doc.speed.keyframes}])];}
+    rows(){const offset=this.beatLaneHeight();return [...CHANNELS.map(([name],i)=>({name,y:40+offset+i*24,height:24,keys:this.doc.tracks[name]})),...(this.free()?[]:[{name:'rate',y:208+offset,height:102,keys:this.doc.speed.keyframes}])];}
     locate(id){for(const row of this.rows()){const key=row.keys.find(k=>k._id===id);if(key)return {row,key};}return null;}
     displayTime(time,map=this.map()){return this.free()?time:this.axis==='shooting'?map.atTime(time):time-map.start;}
     fromDisplay(value,map=this.map()){return this.free()?value:this.axis==='shooting'?map.atSeconds(value):map.start+value;}
@@ -136,6 +141,16 @@
       this.root.querySelector('.seq-ruler-label').textContent=this.free()?'镜头时间':'对局时间 / 拍摄参考';
       this.content.style.width=width+'px';this.svg.setAttribute('width',width);this.svg.setAttribute('height',height);this.svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
       const html=[],line=(x1,y1,x2,y2,cls)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${cls}"/>`;
+      const beatHeight=this.beatLaneHeight();this.beatLabel.hidden=!beatHeight;
+      if(beatHeight){
+        this.beatLabel.querySelector('output').textContent=this.adapter.beatSettings().bpm;
+        const grid=this.beatGrid(),left=this.fromDisplay(Math.max(0,(this.scroll.scrollLeft-24)/this.scale),map),right=this.fromDisplay((this.scroll.scrollLeft+this.scroll.clientWidth+24)/this.scale,map);
+        html.push(`<rect x="0" y="40" width="${width}" height="24" class="seq-beat-bg"/>`);
+        for(const beat of Beats.visible(grid,left,right,Math.ceil(this.scroll.clientWidth/12))){
+          const x=this.x(beat.time,map),title=`第 ${Math.floor(beat.index/grid.division)+1} 拍 · ${pretty(beat.time)} s`;
+          html.push(`<g class="seq-beat${beat.major?' major':''}" data-beat="${beat.time}" tabindex="0" role="button" aria-label="${title}"><title>${title}</title><rect x="${x-6}" y="40" width="12" height="24" class="seq-beat-hit"/><path d="M ${x} ${beat.major?44:48} V 60"/></g>`);
+        }
+      }
       let step=1;const target=78/this.scale;step=[.05,.1,.2,.5,1,2,5,10,20,30,60,120,300,600].find(n=>n>=target)||1200;
       const visibleStart=Math.max(0,Math.floor((this.scroll.scrollLeft-100)/this.scale/step)*step),visibleEnd=Math.min(total,(this.scroll.scrollLeft+this.scroll.clientWidth+100)/this.scale);
       for(let t=visibleStart;t<=visibleEnd+1e-6;t+=step){const x=14+t*this.scale,battle=this.axis==='shooting'?map.atSeconds(t):map.start+t,shoot=this.axis==='shooting'?t:map.atTime(map.start+t);
@@ -162,7 +177,7 @@
         html.push(`<rect x="0" y="${row.y}" width="${width}" height="${row.height}" class="seq-row-bg ${i%2?'alt':''}"/>`);
         if(row.name!=='rate'){
           if(guardX!==null)html.push(`<rect x="${this.x(map.start,map)}" y="${row.y}" width="${Math.max(0,guardX-this.x(map.start,map))}" height="${row.height}" class="seq-keyframe-blocked"/>`);
-          const keys=row.keys,first=keys[0],last=keys.at(-1);html.push(line(this.x(first.time_sec,map),row.y+12,this.x(last.time_sec,map),row.y+12,'seq-track-span'));
+          const keys=row.keys,first=keys[0],last=keys.at(-1);if(first)html.push(line(this.x(first.time_sec,map),row.y+12,this.x(last.time_sec,map),row.y+12,'seq-track-span'));
           for(const k of keys){const x=this.x(k.time_sec,map),y=row.y+12;html.push(this.diamond(k,x,y,row.name,`${CHANNELS[i][1]} · ${this.free()?'镜头':'对局'} ${pretty(k.time_sec)}s · ${pretty(k.value)}`));}
         }else{
           const sy=r=>row.y+82-r*65,sx=p=>14+this.rateDisplay(p,map)*this.scale;
@@ -194,8 +209,9 @@
           else html.push(`<text x="16" y="${row.y+99}" class="seq-ruler-sub">${speed.mode==='paused'?'战斗暂停，仅摄像机运动':'固定倍率 · '+speed.rate+'×'}</text>`);
         }
       }
-      if(guardStart!==null)html.push(`<line x1="${guardX}" y1="40" x2="${guardX}" y2="208" class="seq-keyframe-boundary"/><text x="${guardX+4}" y="204" class="seq-keyframe-boundary-label">比赛开始</text>`);
+      if(guardStart!==null)html.push(`<line x1="${guardX}" y1="${40+beatHeight}" x2="${guardX}" y2="${208+beatHeight}" class="seq-keyframe-boundary"/><text x="${guardX+4}" y="${204+beatHeight}" class="seq-keyframe-boundary-label">比赛开始</text>`);
       this.svg.innerHTML=html.join('');this.updatePlayhead(this.playhead);this.inspector();
+      this.adapter.onBeatRender?.();
       this.root.querySelector('[data-action=undo]').disabled=!this.undoStack.length||this.locked;
       this.root.querySelector('[data-action=redo]').disabled=!this.redoStack.length||this.locked;
       this.updateClipboardButtons();
@@ -362,7 +378,7 @@
     validate(before=null){
       if(!Timing.valid(this.doc.speed))throw new Error('速度曲线时间范围或倍率无效。');
       for(const row of this.rows()){
-        if(!row.keys.length)throw new Error('每条参数轨道至少保留一个关键帧。');
+        if(row.name==='rate'&&!row.keys.length)throw new Error('速率轨道需保留首尾关键帧。');
         const field=row.name==='rate'?'progress':'time_sec';row.keys.sort((a,b)=>a[field]-b[field]);
         for(let i=0;i<row.keys.length;i++){const k=row.keys[i],t=k[field],v=row.name==='rate'?k.rate:k.value;
           if(!Number.isFinite(t)||!Number.isFinite(v)||Math.abs(t)>1e7||Math.abs(v)>1e7)throw new Error('请输入有效数值。');
@@ -459,15 +475,19 @@
       const targets=[0,this.displayTime(map.workStart,map),this.displayTime(map.workEnd,map)];
       for(const row of this.rows())if(row.name!=='rate'&&row.name!==skipRow)for(const k of row.keys){if(exclude?.has(k._id))continue;targets.push(this.displayTime(k.time_sec,map));}
       if(includePlayhead)targets.push(this.displayTime(this.playhead,map));
+      targets.beats=this.beatGrid(map);targets.map=map;
       return targets;
     }
-    snapTo(time,targets){let best=null;for(const t of targets){const dist=Math.abs(t-time)*this.scale;if(dist<10&&(!best||dist<best.dist))best={time:t,dist};}return best;}
+    snapTo(time,targets){const beat=targets.beats?Beats.nearest(targets.beats,this.fromDisplay(time,targets.map),t=>Math.abs(this.displayTime(t,targets.map)-time)):null;const values=beat==null?targets:[...targets,this.displayTime(beat,targets.map)];let best=null;for(const t of values){const dist=Math.abs(t-time)*this.scale;if(dist<10&&(!best||dist<best.dist))best={time:t,dist};}return best;}
     point(e){const r=this.scroll.getBoundingClientRect(),scale=globalThis.BlitzUIScale||1;return {x:(e.clientX-r.left)/scale+this.scroll.scrollLeft,y:(e.clientY-r.top)/scale+this.scroll.scrollTop};}
     down(e){
       this.wheelAnchor=null;
       if(e.button!==0||!this.doc||e.target.closest('input,select,button'))return;
       const key=e.target.closest('[data-key]'),work=e.target.closest('[data-work]'),p=this.point(e),map=this.map();
       if(!this.scroll.contains(e.target))return;
+      const beat=e.target.closest('[data-beat]');
+      if(beat){e.preventDefault();this.scroll.focus({preventScroll:true});this.adapter.seek(Number(beat.dataset.beat));return;}
+      if(this.beatLaneHeight()&&p.y>=40&&p.y<64){e.preventDefault();this.scroll.focus({preventScroll:true});this.drag={kind:'seek',map,pointerId:e.pointerId};this.root.setPointerCapture(e.pointerId);this.scrub(p.x,map,e);return;}
       if(work&&!this.free()){
         if(this.locked||this.drag)return;
         if(work.dataset.work!=='end')try{

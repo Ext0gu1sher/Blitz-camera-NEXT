@@ -61,7 +61,7 @@
     if(Math.min(...checked.map(item=>item.time))!==0)fail('关键帧剪贴板缺少起始时刻。');return checked;
   }
   function validateCamera(rows,channel){
-    if(!Array.isArray(rows)||!rows.length||rows.length>200)fail('每条摄像机轨道需要 1–200 个关键帧。');
+    if(!Array.isArray(rows)||rows.length>200)fail('每条摄像机轨道最多 200 个关键帧。');
     for(let i=0;i<rows.length;i++){
       const k=rows[i];keyData(channel,k,true);finite(k.time_sec,0,1e7,'关键帧时间');
       if(i&&k.time_sec-rows[i-1].time_sec<MIN_GAP)fail('同一轨道的关键帧不能重合或过近。');
