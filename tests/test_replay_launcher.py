@@ -98,6 +98,8 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        documents = patch('blitzcam.settings.documents_directory', return_value=self.root/'Documents')
+        documents.start(); self.addCleanup(documents.stop)
         self.output_patch = patch('blitzcam.server.OUTPUT', self.root)
         self.output_patch.start()
         self.replay = self.root/'镜头 A.wotbreplay'

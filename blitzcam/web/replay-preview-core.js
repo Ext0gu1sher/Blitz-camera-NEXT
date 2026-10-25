@@ -52,7 +52,7 @@ export function createReplaySampler(bundle,replayOrigin){
     if(![pose.x,pose.y,pose.z,pose.yaw,pose.pitch,pose.roll].every(Number.isFinite))return null;
     return {eid,def:originals.get(eid),pose,life:defLifeAt(originals.get(eid),raw)};
   };
-  return {clock,origin:replayOrigin,rawTime,poseAtRaw,meta:p.meta,at(replayTime,offset=0){
+  const at=(replayTime,offset=0)=>{
     // The editor uses ReplayPlayer's raw - origin getter. Facets retain raw
     // packet clocks; period-3 startRaw is a separate battle/countdown origin.
     const raw=rawTime(replayTime,offset), frames=[];
@@ -67,7 +67,31 @@ export function createReplaySampler(bundle,replayOrigin){
       if(frame)frames.push({...frame,life});
     }
     return frames;
+  };
+  return {clock,origin:replayOrigin,rawTime,poseAtRaw,meta:p.meta,at,recorderAt(replayTime,offset=0){
+    const frames=at(replayTime,offset).filter(frame=>facts.entities.get(frame.eid)?.recorder&&frame.def.account_id===facts.recorderAccountId);
+    return frames.length===1?frames[0]:null;
   }};
+}
+
+// A stable rear-view preset for the offline preview. 54 degrees is the desktop
+// client's default horizontal FOV; distance/elevation are preview framing, not
+// a reconstruction of the game's unrecorded orbit input or camera collisions.
+export function cameraBehindVehicle(pose){
+  if(!pose||![pose.x,pose.y,pose.z,pose.yaw].every(Number.isFinite))return null;
+  const back=15,height=6;
+  // Replay vehicle coordinates are y-up, yaw 0 = +z. Camera tracks are z-up,
+  // yaw 0 = +x, so heading becomes 90 degrees minus the hull's yaw.
+  return {position:[pose.x-Math.sin(pose.yaw)*back,pose.z-Math.cos(pose.yaw)*back,pose.y+height],
+    yaw:90-pose.yaw*180/Math.PI,pitch:-10,roll:0,zoom:54};
+}
+
+// Integrated replay seconds for a held arrow key. The initial single-frame tap
+// is separate. After a short tap window, ramp smoothly from 1x to 64x in 3 s.
+// Integrating the curve makes travel independent of key-repeat/display rates.
+export function flightSeekSeconds(heldSeconds,{seekDelay=.25,seekRamp=3,seekMax=64}={}){
+  const elapsed=Math.max(0,heldSeconds-seekDelay),ramp=Math.min(elapsed,seekRamp);
+  return ramp+(seekMax-1)*ramp**3/(3*seekRamp**2)+Math.max(0,elapsed-seekRamp)*seekMax;
 }
 
 export function cameraEvaluator(tracks,smooth,easing){

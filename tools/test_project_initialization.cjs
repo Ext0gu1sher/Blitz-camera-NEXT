@@ -6,39 +6,42 @@ const base=process.argv[2];
   const errors=[],requests=[];
   try{
     const page=await browser.newPage();page.on('pageerror',e=>errors.push(e.message));
-    let heldSelect=null;
+    let heldSelect=null,heldPicker=null;
     const source={id:'fixture',sha256:'a'.repeat(64),replay_file:'chosen.wotbreplay',name:'chosen',duration_sec:300,battle_start_status:'identified',battle_start_sec:15.75,replay_origin_sec:4.25};
     await page.route('**/api/preview/select',async route=>{requests.push(route.request().postDataJSON());heldSelect=route;});
+    await page.route('**/api/replay/select',route=>{heldPicker=route;});
     await page.route('**/api/preview/replay/*',route=>route.fulfill({body:Buffer.from('fixture')}));
     const ready=()=>page.waitForFunction(()=>state.loaded&&replayPreviewPane&&state.samples.length&&!state.busy);
     const fresh=async name=>{
       await page.evaluate(async name=>{await window.BlitzFlushEditorSession();await api('/api/projects/new',{name});await refreshState(true);},name);
-      await ready();
+      await page.waitForFunction(()=>state.loaded&&replayPreviewPane&&state.samples.length);
     };
     const empty=async()=>{
       assert.deepEqual(await page.evaluate(()=>({source:replayPreviewPane.source,data:replayPreviewPane.data,
         sampler:replayPreviewPane.sampler,status:replayPreviewPane.status,file:state.timeline?.replay_file||null,
-        label:$('previewSourceFile').textContent,disabled:$('loadPreviewReplay').disabled})),
-        {source:null,data:null,sampler:null,status:'empty',file:null,label:'—',disabled:false});
+        label:$('previewSourceFile').textContent,disabled:$('retryPreview').disabled})),
+        {source:null,data:null,sampler:null,status:'empty',file:null,label:'—',disabled:true});
     };
     await page.goto(base);await ready();await page.evaluate(()=>refreshState());
     await empty();assert.equal(requests.length,0,'A previous launch must not bind the new project');
 
     // A slow file picker result belongs only to the project that opened it.
-    let requested=page.waitForRequest(r=>r.url().endsWith('/api/preview/select'));
-    await page.evaluate(()=>{window.pendingSelect=replayPreviewPane.select('old.wotbreplay');});await requested;
-    await page.waitForFunction(()=>$('loadPreviewReplay').disabled);
+    let requested=page.waitForRequest(r=>r.url().endsWith('/api/replay/select'));
+    await page.evaluate(()=>{window.pendingSelect=selectProjectReplay();});await requested;
+    await page.waitForFunction(()=>$('openReplayButton').disabled);
     await fresh('new-during-picker');
-    assert.ok(heldSelect);await heldSelect.fulfill({json:{source}});heldSelect=null;
+    assert.ok(heldPicker);await heldPicker.fulfill({json:{info:source}});heldPicker=null;
     await page.evaluate(()=>window.pendingSelect);await empty();
 
     // A late parser result must not repopulate source/data or bind another project.
     requested=page.waitForRequest(r=>r.url().endsWith('/api/preview/select'));
     await page.evaluate(()=>{
       replayPreviewPane.parse=()=>new Promise(resolve=>window.finishParse=resolve);
-      window.pendingSelect=replayPreviewPane.select('chosen.wotbreplay');
+      const select=replayPreviewPane.select.bind(replayPreviewPane);
+      replayPreviewPane.select=(...args)=>(window.pendingSelect=select(...args));
+      applyReplayInfo({replay_file:'chosen.wotbreplay',name:'chosen',duration_sec:300,battle_start_status:'identified',battle_start_sec:15.75,replay_origin_sec:4.25});
     });
-    await page.waitForFunction(()=>$('loadPreviewReplay').disabled);
+    await page.waitForFunction(()=>$('retryPreview').disabled);
     await requested;
     assert.ok(heldSelect);await heldSelect.fulfill({json:{source}});heldSelect=null;
     await page.waitForFunction(()=>!!window.finishParse);

@@ -5,6 +5,19 @@
   class SpeedEditor{
     constructor(pane,editor,adapter){
       this.pane=pane;this.editor=editor;this.adapter=adapter;this.svg=pane.querySelector('#speedGraph');this.drag=null;
+      this.view={start:0,zoom:1};this.scroll=pane.querySelector('#speedScroll');this.zoomInput=pane.querySelector('#speedZoom');
+      this.zoomInput.addEventListener('input',()=>this.setZoom(2**Number(this.zoomInput.value)));
+      for(const name of ['in','out','fit'])pane.querySelector(`[data-speed-view=${name}]`).onclick=()=>name==='fit'?this.resetView():this.setZoom(this.view.zoom*(name==='in'?1.5:1/1.5));
+      this.scroll.addEventListener('scroll',()=>{
+        if(!this.scroll.clientWidth)return;
+        this.view.start=clamp(this.scroll.scrollLeft/(this.scroll.clientWidth*this.view.zoom),0,1-1/this.view.zoom);
+        this.viewLabel();this.adapter.draw();
+      });
+      this.svg.addEventListener('wheel',e=>{
+        if(this.drag||!this.editor.doc)return;
+        if(e.altKey||e.ctrlKey||e.metaKey){e.preventDefault();this.setZoom(this.view.zoom*Math.exp(-e.deltaY*.002),this.point(e).p);}
+        else if(this.view.zoom>1){e.preventDefault();this.setView(this.view.start+(e.deltaX||e.deltaY)/(Math.max(1,this.svg.clientWidth)*this.view.zoom),this.view.zoom);}
+      },{passive:false});
       this.fields=Object.fromEntries(['progress','rate','segment'].map(n=>[n,pane.querySelector(`[data-speed-field=${n}]`)]));
       this.svg.addEventListener('pointerdown',e=>this.down(e));this.svg.addEventListener('pointermove',e=>this.move(e));
       this.svg.addEventListener('pointerup',e=>this.up(e));this.svg.addEventListener('pointercancel',()=>this.cancel());
@@ -23,16 +36,33 @@
         const index=this.segment(),mode=this.fields.segment.value;if(index<0)return;
         this.edit(()=>{const s=this.speed(),a=s.keyframes[index];if(mode==='default')delete a.ease;else a.ease=mode==='linear'?[1/3,1/3,2/3,2/3]:mode==='smooth'?[1/3,0,2/3,1]:T.segmentEase(s,index);});
       });
-      new ResizeObserver(()=>this.adapter.draw()).observe(this.svg);
+      new ResizeObserver(()=>{this.syncView();this.adapter.draw();}).observe(this.svg);
       window.addEventListener('blur',()=>{if(this.drag)this.cancel();});
     }
     speed(){return this.editor.doc?.speed;}
+    viewLabel(){
+      this.pane.querySelector('#speedZoomValue').textContent=Number(this.view.zoom.toFixed(1))+'×';
+      this.pane.querySelector('#speedViewRange').textContent=`${(this.view.start*100).toFixed(1)}–${((this.view.start+1/this.view.zoom)*100).toFixed(1)}%`;
+    }
+    syncView(){
+      this.zoomInput.value=Math.log2(this.view.zoom);this.scroll.firstElementChild.style.width=(this.view.zoom*100)+'%';
+      this.scroll.scrollLeft=this.view.start*this.view.zoom*this.scroll.clientWidth;
+      this.pane.querySelector('[data-speed-view=out]').disabled=this.view.zoom<=1;
+      this.pane.querySelector('[data-speed-view=in]').disabled=this.view.zoom>=64;
+      this.viewLabel();
+    }
+    setView(start,zoom){if(this.drag)return;this.view.zoom=clamp(zoom,1,64);this.view.start=clamp(start,0,1-1/this.view.zoom);this.syncView();this.adapter.draw();}
+    setZoom(zoom,anchor=this.speed()?.keyframes[this.index()]?.progress??this.view.start+.5/this.view.zoom){
+      const fraction=clamp((anchor-this.view.start)*this.view.zoom,0,1),next=clamp(zoom,1,64);
+      this.setView(anchor-fraction/next,next);
+    }
+    resetView(){this.setView(0,1);}
     index(){return this.speed()?.keyframes.findIndex(k=>this.editor.selected.has(k._id))??-1;}
     segment(){const i=this.index();return i<0?-1:Math.min(i,this.speed().keyframes.length-2);}
     locked(){return !this.editor.doc||this.editor.locked||this.adapter.locked();}
     edit(fn){if(this.locked())return false;this.adapter.pause();const result=this.editor.edit(fn);this.refresh();return result;}
     curve(){const s=this.speed();if(s.mode!=='curve'){const rate=s.mode==='fixed'?s.rate:1;s.mode='curve';s.keyframes=[{progress:0,rate,_id:++this.editor.ids},{progress:1,rate,_id:++this.editor.ids}];}this.editor.anchorSpeed();return s;}
-    point(e){const r=this.svg.getBoundingClientRect(),l=this.svg.speedLayout;return {p:clamp((e.clientX-r.left-l.left)/(l.right-l.left),0,1),rate:clamp((l.bottom-e.clientY+r.top)/(l.bottom-l.top),.0625,1)};}
+    point(e){const r=this.svg.getBoundingClientRect(),l=this.svg.speedLayout,x=(e.clientX-r.left)*l.width/r.width,y=(e.clientY-r.top)*l.height/r.height;return {p:clamp(this.view.start+(x-l.left)/(l.right-l.left)/this.view.zoom,0,1),rate:clamp((l.bottom-y)/(l.bottom-l.top),.0625,1)};}
     add(point){
       this.edit(()=>{const s=this.curve(),p=point.p,near=s.keyframes.find(k=>Math.abs(k.progress-p)<1e-5);if(near){this.editor.selected=new Set([near._id]);return;}
         const k=T.insertKey(s,p,point.rate??T.rateAt(s,p));k._id=++this.editor.ids;T.boundHandles(s);this.editor.selected=new Set([k._id]);

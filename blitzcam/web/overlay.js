@@ -37,7 +37,7 @@ async function api(path,body){
 function buttons(){
   const d=model.data,c=d?.connection?.state==="connected",active=!!d?.playback?.active;
   const opening=['choosing','launching'].includes(d?.replay_launch?.state);
-  const paused=d?.sample?.replay?.paused===true,disabled=model.busy||!model.ready||opening,hasPath=(d?.project?.keyframes?.length||0)>=2;
+  const paused=d?.sample?.replay?.paused===true,disabled=model.busy||!model.ready||opening||!d?.project,hasPath=(d?.project?.keyframes?.length||0)>=2;
   $("openReplay").disabled=disabled||active||opening||d?.connection?.state==="connecting";
   const bound=d?.project?.replay_timeline?.replay_file;
   $("openReplay").textContent=opening?'打开中…':bound?'启动回放':'选择回放…';
@@ -92,7 +92,7 @@ function render(){
   ["x","y","z"].forEach((id,i)=>$(id).textContent=num(c?.position?.[i]));
   ["yaw","pitch","roll"].forEach(id=>$(id).textContent=num(c?.[id+"_deg"],2)+"°");$("fov").textContent=num(c?.horizontal_fov_deg,2)+"°";
   $("dataQuality").textContent=c?"实时读取":"无数据";
-  const speed=d.project.replay_speed,free=d.project.shooting_mode==="camera_only";
+  const speed=d.project?.replay_speed,free=!d.project||d.project.shooting_mode==="camera_only";
   for(const el of document.querySelectorAll(".mini-speed-heading, #miniSpeedGraph, #miniSpeedReadout"))el.toggleAttribute('hidden',free);
   $("clockLabel").textContent=speed?.mode!=="paused"&&speed?.camera_clock==="replay"?"战斗秒":"拍摄秒";
   $("speedModeLabel").textContent=!speed||speed.mode==="paused"?"战斗保持暂停":speed.mode==="fixed"?`战斗 ${num(speed.rate,3)}×` : "战斗按速度曲线";
@@ -107,6 +107,7 @@ async function loadPreview(hash){
   if(panel!=="all"&&panel!=="keyframes")return;
   const sequence=++model.previewSequence;
   model.previewReady=false;model.previewLoading=true;preview.load([],[],[]);buttons();
+  if(!model.data.project){model.previewLoading=false;return;}
   const revision=model.data.project_revision,frames=structuredClone(model.data.project.keyframes);
   const duration=frames.at(-1).time_sec-frames[0].time_sec;
   try{
@@ -122,6 +123,7 @@ async function poll(force=false){
   try{
     const data=await api("/api/state"),hash=JSON.stringify(data.project),changed=hash!==model.projectHash;
     model.data=data;model.ready=true;
+    if(!data.project){model.projectHash=hash;if(changed)loadPreview(hash);render();$('miniLiveStatus').textContent='请在工作台主页新建或打开项目。';return;}
     if(data.project.shooting_mode!=="camera_only"&&data.project.replay_timeline){const t=data.project.replay_timeline;$("pathDuration").value=Number((t.work_end_sec-t.work_start_sec).toFixed(6));}
     if(data.project.shooting_mode!=="camera_only"&&data.sample?.replay?.paused)$("captureTime").value=data.sample.replay.time.toFixed(6);
     if(changed){
@@ -191,11 +193,15 @@ if(native){
     if(h.type==="host-action"&&h.action==="capture"){poll(true);toast("已通过全局快捷键记录全部七项属性关键帧。");return;}
     if(h.type!=="host-state")return;
     model.hostState=h;
-    $("hide").title=`Ctrl+Alt+${h.hideKey} 显示/隐藏`;
-    $("capture").title=`Ctrl+Alt+${h.captureKey||'F8'} 记录全部七项属性关键帧`;
+    const keyLabel=k=>(k.includes('+')?k:'Ctrl+Alt+'+k).replace(/Key|Digit/g,'').replace(/Numpad/g,'小键盘 ');
+    $("hide").title=`${keyLabel(h.hideKey)} 显示/隐藏`;
+    $("capture").title=`${keyLabel(h.captureKey||'F8')} 记录全部七项属性关键帧`;
     if(document.activeElement!==$("opacity")){$("opacity").value=h.opacity;$("opacityValue").textContent=h.opacity+"%";}
-    if(document.activeElement!==$("hideKey"))$("hideKey").value=h.hideKey;
-    if(document.activeElement!==$("captureKey"))$("captureKey").value=h.captureKey||'F8';
+    for(const [id,key] of [['hideKey',h.hideKey],['captureKey',h.captureKey||'F8']]){
+      const select=$(id),legacy=/^Ctrl\+Alt\+F(?:[7-9]|1[0-2])$/.test(key)?key.replace('Ctrl+Alt+',''):key;
+      if(![...select.options].some(o=>o.value===legacy))select.add(new Option(keyLabel(key),legacy));
+      if(document.activeElement!==select)select.value=legacy;
+    }
     if(model.data)renderStatus();sendSummary();
   });bridge("ready");
 }

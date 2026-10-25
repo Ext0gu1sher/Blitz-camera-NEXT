@@ -48,6 +48,24 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(exc.exception.code,400)
         self.assertEqual(self.request('/api/export'),before)
 
+    def test_select_replay_reads_metadata_without_launching_or_changing_project(self):
+        replay=Path(self.tmp.name)/'chosen.wotbreplay'
+        with zipfile.ZipFile(replay,'w') as archive:
+            archive.writestr('meta.json',json.dumps({'battleDuration':45,'version':'11.21.0'}))
+        before=self.request('/api/export')
+        with patch('blitzcam.replay_launcher.choose_replay',return_value=replay), \
+             patch('blitzcam.replay_launcher.locate_client',side_effect=AssertionError('game lookup')), \
+             patch.object(self.app,'open_replay',side_effect=AssertionError('game launch')):
+            info=self.request('/api/replay/select',{})['info']
+            self.assertEqual(info['replay_file'],str(replay.resolve()))
+            self.assertEqual(info['duration_sec'],45)
+        with patch('blitzcam.replay_launcher.choose_replay',return_value=None):
+            self.assertEqual(self.request('/api/replay/select',{}),{'cancelled':True})
+        with patch('blitzcam.replay_launcher.choose_replay',return_value=replay.with_name('missing.wotbreplay')):
+            with self.assertRaises(urllib.error.HTTPError):self.request('/api/replay/select',{})
+        self.assertEqual(self.request('/api/export'),before)
+        self.assertIsNone(self.app.replay_preview.source)
+
     def test_open_replay_route_dispatches_without_blocking_on_picker(self):
         with patch.object(self.app, 'open_replay') as open_replay:
             self.assertEqual(self.request('/api/replay/open', {}), {'ok':True})

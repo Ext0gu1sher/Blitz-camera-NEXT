@@ -41,6 +41,12 @@ def main():
         if hashlib.sha256((app/name).read_bytes()).hexdigest() != expected:
             raise AssertionError('Changed package file: '+name)
     env = dict(os.environ, BLITZCAM_DATA_ROOT=str(app), BLITZCAM_DESKTOP_SMOKE='1')
+    # Releases need not contain a seed project. Create a fixture only inside
+    # the isolated extraction so both ordinary and preview smoke tests work.
+    fixture = app/'output/project.json'
+    if not fixture.exists():
+        fixture.parent.mkdir(exist_ok=True)
+        fixture.write_bytes((app/'app/examples/eight-second.json').read_bytes())
     if args.overlay_visibility:env['BLITZCAM_OVERLAY_SMOKE']='1'
     if args.preview_replay:
         env['BLITZCAM_PREVIEW_SMOKE']='1'
@@ -85,6 +91,19 @@ def main():
     if not state_file.exists():
         raise AssertionError('Desktop service did not start')
     initial_service = json.loads(state_file.read_text(encoding='utf-8-sig'))
+    # Normal startup now stays on Home. Open only this isolated smoke fixture.
+    import urllib.request
+    with urllib.request.urlopen(initial_service['url']+'api/state', timeout=10) as response:
+        startup_state = json.load(response)
+    if startup_state['project_path'] is not None or startup_state['project'] is not None:
+        raise AssertionError('Normal launch opened a project instead of Home')
+    if startup_state['version'] != manifest['version']:
+        raise AssertionError('Application version does not match package')
+    request = urllib.request.Request(initial_service['url']+'api/projects/open',
+        data=json.dumps({'path':str(app/'output/project.json')}).encode(),
+        headers={'Content-Type':'application/json'})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        json.load(response)
     # A second launch signals the original window instead of creating a backend.
     second = subprocess.run([str(app/'BlitzCamera.exe')], cwd=relocated, env=env,
                             creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)
@@ -116,7 +135,6 @@ def main():
     if not status['workbench']['ready'] or status['gameFound']:
         raise AssertionError(status)
     state = json.loads((app/'output/workstation-service.json').read_text(encoding='utf-8-sig'))
-    import urllib.request
     try:
         urllib.request.urlopen(state['url']+'api/state',timeout=1)
     except OSError:
@@ -128,6 +146,7 @@ def main():
     report = {'package':str(args.archive.resolve()), 'package_sha256':hashlib.sha256(args.archive.read_bytes()).hexdigest(),
               'version':manifest['version'], 'runtime_probe':probe_result,
               'native_webview':smoke, 'native_actions':actions, 'duplicate_launch_reused_backend':True,
+              'startup_home_without_project':True, 'application_version_verified':True,
               'backend_exited':True, 'source_project_unchanged':before,
               'relocated_directory':str(app), 'scope':'offscreen native desktop; no game access or Hook execution'}
     if args.overlay_visibility:

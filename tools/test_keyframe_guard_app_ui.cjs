@@ -55,15 +55,15 @@ const out=path.resolve('output/keyframe-guard-app-acceptance');fs.mkdirSync(out,
   await page.reload();await enterFixture(page);await page.waitForFunction(()=>sequenceEditor?.doc&&state.keyframeGuard);
   assert.equal(await page.evaluate(()=>keyframeGuardFor(sequenceEditor.data()).start_sec),0);assert.equal(await page.evaluate(()=>state.tracks.x.some(k=>k.time_sec===12)),true);
   assert.equal(await page.evaluate(()=>state.timeline.work_start_sec),5);
-  // Create the actual default project from Home, then use the real preview
-  // import path. Its original 0..8 range must not remain before the event.
+  // Create the actual default project from Home, then bind replay metadata.
+  // Its original 0..8 range must not remain before the event.
   await page.evaluate(async()=>{const settings=await api('/api/settings');await api('/api/settings',{project_directory:settings.project_directory,replay_keyframe_start_seconds:null});await refreshState();});
   const previousProject=await page.evaluate(()=>state.projectPath);
   await page.locator('#homeButton').click();await page.locator('#homeNew').click();await page.locator('#homeNewName').fill('默认项目回放边界验收');await page.locator('#homeNewName').press('Enter');
   await page.waitForFunction(previous=>state.projectPath!==previous&&!state.busy,previousProject);await saved();
   const defaultTracks=await page.evaluate(()=>sequenceEditor.data().tracks);
   assert.deepEqual(await page.evaluate(()=>[state.timeline.work_start_sec,state.timeline.work_end_sec]),[0,8]);
-  await page.evaluate(path=>replayPreviewPane.select(path),replay);await saved();
+  await page.evaluate(async path=>applyReplayInfo(await api('/api/replay/timeline',{path})),replay);await saved();
   assert.deepEqual(await page.evaluate(()=>[state.timeline.work_start_sec,state.timeline.work_end_sec]),[15,23]);
   assert.deepEqual(await page.evaluate(()=>sequenceEditor.data().tracks),defaultTracks);
   const dragRange=async(part,target)=>{

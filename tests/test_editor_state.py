@@ -12,6 +12,8 @@ class EditorSessionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name)
+        documents = patch('blitzcam.settings.documents_directory', return_value=self.out/'Documents')
+        documents.start(); self.addCleanup(documents.stop)
         self.patch = patch('blitzcam.server.OUTPUT', self.out)
         self.patch.start()
         self.app = Workstation(self.out/'project.json')

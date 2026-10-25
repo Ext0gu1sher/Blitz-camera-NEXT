@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main(fixture='test_keyframe_guard_app_ui.cjs'):
-    with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp, patch('blitzcam.server.OUTPUT', Path(tmp)):
+    with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp, patch('blitzcam.server.OUTPUT', Path(tmp)), \
+         patch('blitzcam.settings.documents_directory', return_value=Path(tmp)/'Documents'):
         replay = Path(tmp)/'比赛开始事件.wotbreplay'
         nested = bytes.fromhex('080311') + struct.pack('<d', 420.) + bytes.fromhex('18a403')
         body = bytes((26, len(nested))) + nested

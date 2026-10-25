@@ -13,6 +13,13 @@ from tests.fixtures.replay_data import replay_data
 
 
 class PreviewTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'),'Node required for preview flight validation')
+    def test_flight_seek_acceleration_caps_and_camera_roll_directions(self):
+        script=Path(__file__).parent/'fixtures/replay_flight_controls.mjs'
+        result=subprocess.run(['node',str(script)],capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue(json.loads(result.stdout)['passed'])
+
     @unittest.skipUnless(shutil.which('node'),'Node required for preview pose validation')
     def test_pose_validation_preserves_smooth_curves_and_rejects_invalid_data(self):
         script=Path(__file__).parent/'fixtures/replay_pose_validation.mjs'

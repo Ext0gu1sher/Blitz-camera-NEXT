@@ -18,6 +18,9 @@ class ProjectFileTests(unittest.TestCase):
         self.out = Path(self.tmp.name)
         self.patcher = patch('blitzcam.server.OUTPUT', self.out)
         self.patcher.start()
+        self.documents=(self.out/'Documents').resolve()
+        self.documents_patcher=patch('blitzcam.settings.documents_directory',return_value=self.documents)
+        self.documents_patcher.start()
         self.app = Workstation(self.out/'project.json')
         self.http = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.app))
         self.thread = threading.Thread(target=self.http.serve_forever, daemon=True)
@@ -26,7 +29,7 @@ class ProjectFileTests(unittest.TestCase):
 
     def tearDown(self):
         self.http.shutdown(); self.http.server_close(); self.thread.join()
-        self.app.close(); self.patcher.stop(); self.tmp.cleanup()
+        self.app.close(); self.patcher.stop(); self.documents_patcher.stop(); self.tmp.cleanup()
 
     def request(self, path, data=None):
         request = urllib.request.Request(self.base + path,
@@ -39,7 +42,7 @@ class ProjectFileTests(unittest.TestCase):
         result = self.request('/api/projects/new', {'name': '航拍 项目'})
         path = Path(result['path'])
         self.assertTrue(path.is_file())
-        self.assertEqual(path.parent, (self.out/'projects').resolve())
+        self.assertEqual(path.parent, self.documents/'Blitz-Camera-Project')
         state = self.request('/api/state')
         self.assertEqual(state['project_path'], str(path.resolve()))
         self.assertEqual(state['project_name'], '航拍 项目')
@@ -79,21 +82,21 @@ class ProjectFileTests(unittest.TestCase):
         loaded = json.loads(target.read_text(encoding='utf-8'))
         self.assertEqual(loaded['schema_version'], 1)
 
-    def test_startup_project_prefers_recent_existing(self):
-        self.assertEqual(startup_project(), self.out/'project.json')
+    def test_startup_project_does_not_create_or_auto_open_a_project(self):
+        self.assertIsNone(startup_project())
         other = self.out/'projects'/'x.json'
         other.parent.mkdir(parents=True)
         other.write_text('{}', encoding='utf-8')
         record_recent(other)
-        self.assertEqual(startup_project(), other.resolve())
+        self.assertIsNone(startup_project())
         other.unlink()
-        self.assertEqual(startup_project(), self.out/'project.json')
+        self.assertIsNone(startup_project())
 
     def test_settings_persist_and_new_projects_use_selected_directory(self):
         from blitzcam.settings import read_settings
         original=self.app.project_path
         defaults=self.request('/api/settings')
-        self.assertEqual(Path(defaults['project_directory']),(self.out/'projects').resolve())
+        self.assertEqual(Path(defaults['project_directory']),(self.documents/'Blitz-Camera-Project').resolve())
         folder=(self.out/'摄影 项目'/'新目录').resolve()
         result=self.request('/api/settings',{'project_directory':str(folder)})
         self.assertEqual(Path(result['project_directory']),folder)
@@ -105,7 +108,7 @@ class ProjectFileTests(unittest.TestCase):
         record_recent(original)
         original.unlink(missing_ok=True)
         Path(created['path']).unlink()
-        self.assertEqual(startup_project(),folder/'project.json')
+        self.assertIsNone(startup_project())
 
     def test_folder_picker_cancel_and_dialogs_use_setting(self):
         folder=(self.out/'custom').resolve();self.request('/api/settings',{'project_directory':str(folder)})
@@ -132,12 +135,43 @@ class ProjectFileTests(unittest.TestCase):
 
     def test_corrupt_settings_fall_back_without_changing_project(self):
         (self.out/'settings.json').write_text('{broken',encoding='utf-8')
-        self.assertEqual(Path(self.request('/api/settings')['project_directory']),(self.out/'projects').resolve())
+        self.assertEqual(Path(self.request('/api/settings')['project_directory']),(self.documents/'Blitz-Camera-Project').resolve())
+
+    def test_legacy_default_moves_to_documents_without_moving_existing_projects(self):
+        legacy=self.out/'projects';legacy.mkdir()
+        old=legacy/'keep.json';old.write_text('original',encoding='utf-8')
+        (self.out/'settings.json').write_text(json.dumps({'schema_version':1,'project_directory':str(legacy)}),encoding='utf-8')
+        self.assertEqual(Path(self.request('/api/settings')['project_directory']),self.documents/'Blitz-Camera-Project')
+        self.assertEqual(old.read_text(encoding='utf-8'),'original')
+        self.assertFalse(self.documents.exists())
+
+    def test_ui_scale_persists_and_rejects_invalid_values(self):
+        folder=self.out/'custom'
+        good=self.request('/api/settings',{'project_directory':str(folder),'ui_scale':150})
+        self.assertEqual(self.request('/api/state')['ui_scale'],150)
+        self.assertEqual(self.request('/api/settings',{'project_directory':str(folder)})['ui_scale'],150)
+        for value in (None,True,0,99,201,'150'):
+            with self.subTest(value=value),self.assertRaises(urllib.error.HTTPError):
+                self.request('/api/settings',{'project_directory':str(folder),'ui_scale':value})
+            self.assertEqual(self.request('/api/settings'),good)
+
+    def test_empty_startup_has_no_project_and_rejects_implicit_writes(self):
+        self.app.close();self.app.project=None;self.app.project_path=None;self.app.editor_state=None
+        before=set(self.out.rglob('*'))
+        self.assertIsNone(self.request('/api/state')['project'])
+        self.assertIsNone(self.request('/api/state')['project_path'])
+        for endpoint in ('/api/project/edit','/api/ui/editor','/api/capture/hotkey','/api/replay/select','/api/sample'):
+            with self.subTest(endpoint=endpoint),self.assertRaises(urllib.error.HTTPError):self.request(endpoint,{})
+        self.assertEqual(set(self.out.rglob('*')),before)
+        created=self.request('/api/projects/new',{'name':'手动新建'})
+        self.assertTrue(Path(created['path']).is_file())
+        self.assertEqual(Path(created['path']).parent,self.documents/'Blitz-Camera-Project')
 
 
 class DesktopReuseTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
         self.out = Path(self.tmp.name)
 
     def _service(self):
@@ -174,6 +208,19 @@ class DesktopReuseTests(unittest.TestCase):
             desktop.launch(self.out/'mine.json', 0, view='workbench')
         serve_mock.assert_called_once()
         self.assertEqual(serve_mock.call_args[0][0], (self.out/'mine.json').resolve())
+
+    def test_empty_service_reuse_and_explicit_project(self):
+        from blitzcam import __version__, desktop
+        state = {'version': __version__, 'project_path': None}
+        self._service()
+        with patch('blitzcam.desktop.OUTPUT', self.out), \
+             patch('urllib.request.urlopen', self._fake_urlopen(state)[0]), \
+             patch('blitzcam.server.serve') as serve_mock:
+            desktop.launch(None, 0, view='workbench')
+            serve_mock.assert_not_called()
+            desktop.launch(self.out/'mine.json', 0, view='workbench')
+            serve_mock.assert_called_once()
+            self.assertEqual(serve_mock.call_args[0][0], (self.out/'mine.json').resolve())
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@ import * as THREE from './vendor/three/build/three.module.js';
 import {GLTFLoader} from './vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import {OrbitControls} from './vendor/three/examples/jsm/controls/OrbitControls.js';
 import {PreviewGuides} from './preview-guides.js';
-import {createReplaySampler,cameraEvaluator,cameraBasis,worldToScene,sceneToWorld,verticalAngle,nearestAngle} from './replay-preview-core.js';
+import {createReplaySampler,cameraEvaluator,cameraBasis,cameraBehindVehicle,flightSeekSeconds,worldToScene,sceneToWorld,verticalAngle,nearestAngle} from './replay-preview-core.js';
 import {loadTerrain,buildGroundGeometry,makeGroundMaterial,groundLayerKeys,setupGroundTextures} from './vendor/wotbtools/groundPass.js';
 import {poseFromYPR,dropDuplicateGunMasks,neutralizeDefaultMetalness} from './vendor/wotbtools/glbRig.js';
 import {pruneForeignVariantsDetailed} from './vendor/wotbtools/variantFilter.js';
@@ -15,6 +15,7 @@ import {prepareTankDestroyedVisual,applyTankDestroyedVisual,destroyedVisualAmoun
 
 const QFRAME=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2));
 const FLIGHT_SPEEDS=[1,2,4,8,16,32,64,128,256];
+const controls=()=>window.BlitzControls;
 const $=id=>document.getElementById(id);
 const post=async(path,data)=>{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const v=await r.json();if(!r.ok)throw Error(v.error||'操作失败');return v;};
 const json=async url=>{const r=await fetch(url);if(!r.ok)throw Error(`资源读取失败 (${r.status})`);return r.json();};
@@ -26,15 +27,18 @@ function dispose(root){const seen=new Set(),release=v=>{if(v?.isTexture&&!seen.h
 export class ReplayPreviewPane {
   constructor(adapter){
     this.adapter=adapter;this.generation=0;this.source=null;this.data=null;this.sampler=null;this.active=false;this.view='observer';this.offset=0;this.time=0;this.models=new Map();this.templates=new Map();this.status='empty';this.lastTracks=null;this.pathSamples=null;this.mode='camera_only';
-    this.flying=false;this.flightPending=false;this.flightKeys=new Set();this.flightVelocity=[0,0,0];this.flightSpeed=4;this.flightRequest=0;
+    this.flying=false;this.flightPending=false;this.flightKeys=new Set();this.flightVelocity=[0,0,0];this.flightSeek=null;this.flightSpeed=4;this.flightRequest=0;
     this.flightHost=window.chrome?.webview;
-    $('loadPreviewReplay').onclick=()=>this.select();$('retryPreview').onclick=()=>this.source?this.select(this.source.replay_file):this.select();
+    $('retryPreview').onclick=()=>this.reload();
+    $('previewEmpty').addEventListener('click',()=>this.activateEmpty());
+    $('previewEmpty').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(!e.repeat)this.activateEmpty();}});
     $('previewObserver').onclick=()=>this.setView('observer');$('previewCamera').onclick=()=>this.setView('camera');
     $('previewFit').onclick=()=>this.fit();$('previewRecord').onclick=()=>this.record();
     $('previewFly').onclick=()=>this.flying?this.stopFlight():this.startFlight();
     $('previewOffset').onchange=()=>{const n=Number($('previewOffset').value);if(!Number.isFinite(n)||Math.abs(n)>600){$('previewOffset').value=this.offset;return;}this.offset=n;this.storeOffset();this.render();};
     this.resizeObserver=new ResizeObserver(()=>this.render());this.resizeObserver.observe($('replayScene'));
     window.addEventListener('pagehide',()=>{this.stopFlight();this.worker?.terminate();});
+    window.addEventListener('blitz-controls-changed',()=>this.stopFlight());
   }
   message(text,error=false){$('previewStatus').textContent=text;$('previewStatus').classList.toggle('error',error);}
   empty(label,{progress=null,msg='',error=false}={}){
@@ -51,29 +55,51 @@ export class ReplayPreviewPane {
     $('previewFile').textContent='未选择回放';$('previewFile').title='';
     $('previewSourceFile').textContent='—';$('previewSourceFile').title='';
     $('previewMap').textContent='';$('previewStatus').title='';$('previewOffset').value=0;
-    $('loadPreviewReplay').disabled=false;this.message('请选择当前项目的回放。');this.empty('载入回放');
+    this.syncReloadUI();this.message('点击“载入回放”或顶部按钮选择当前项目的回放。');this.empty('载入回放');
   }
   update({mode,time,tracks,smooth,easing,samples,replayFile,projectPath}){
     if(this.projectPath!==projectPath){this.projectPath=projectPath;this.clear();}
     if(this.boundReplayFile!==replayFile){this.boundReplayFile=replayFile;if(!replayFile)this.clear();}
-    if(this.mode!==mode||this.time!==time||this.lastTracks!==tracks||this.lastSmooth!==smooth||this.lastEasing!==easing){this.stopFlight();this.override=null;}
+    const cameraChanged=this.mode!==mode||this.lastTracks!==tracks||this.lastSmooth!==smooth||this.lastEasing!==easing;
+    // Playback and seeking advance the scene while the pilot keeps the camera.
+    if(cameraChanged||(this.time!==time&&!this.flying)){this.stopFlight();this.override=null;}
     this.mode=mode;this.active=mode==='replay';this.time=time;
     document.querySelector('.preview-panel').classList.toggle('preview3d-active',this.active);
     $('replayPreviewControls').hidden=!this.active;$('replayScene').hidden=!this.active;
+    this.syncReloadUI();
     if(!this.active){this.syncFlightUI();return;}
     if(tracks!==this.lastTracks||smooth!==this.lastSmooth||easing!==this.lastEasing){this.lastTracks=tracks;this.lastSmooth=smooth;this.lastEasing=easing;this.evaluate=cameraEvaluator(tracks,smooth,easing);}
     if(samples!==this.pathSamples){this.pathSamples=samples;this.updatePath();}
-    if(replayFile&&replayFile!==this.requestedPath){this.requestedPath=replayFile;this.select(replayFile,false);}
-    this.render();
+    if(replayFile&&replayFile!==this.requestedPath)this.select(replayFile);
+    // The flight loop renders the new scene time once per frame while moving.
+    if(!this.flying)this.render();
   }
   storeOffset(){try{localStorage.setItem('blitz-preview-residual-offset:'+this.source.sha256,String(this.offset));}catch{}}
-  async select(path,bind=true){
-    const gen=++this.generation;this.cancelParse?.();this.worker?.terminate();this.worker=null;this.resetScene();this.status='loading';this.message('选择并解析本地回放…');this.empty('正在载入回放…',{progress:.02,msg:'选择并解析本地回放…'});
-    $('loadPreviewReplay').disabled=true;
+  syncReloadUI(){
+    const disabled=this.status==='loading'||this.adapter.locked();
+    $('retryPreview').disabled=!this.boundReplayFile||disabled;
+    $('previewEmpty').setAttribute('aria-disabled',String(disabled));$('previewEmpty').tabIndex=disabled?-1:0;
+    $('previewEmpty').title=this.boundReplayFile?'重新加载预览':'选择回放文件';
+  }
+  activateEmpty(){
+    this.syncReloadUI();if($('previewEmpty').getAttribute('aria-disabled')==='true')return;
+    return this.boundReplayFile?this.reload():this.adapter.selectReplay();
+  }
+  reload(){
+    this.syncReloadUI();if($('retryPreview').disabled)return;
+    this.adapter.pause();return this.select(this.boundReplayFile);
+  }
+  async select(path){
+    if(!path)return;
+    this.requestedPath=path;
+    const gen=++this.generation;this.cancelParse?.();this.worker?.terminate();this.worker=null;this.resetScene();this.source=null;this.data=null;this.status='loading';this.message('正在读取本地回放…');this.empty('正在载入回放…',{progress:.02,msg:'正在读取本地回放…'});
+    $('previewFile').textContent=path.split(/[\\/]/).at(-1);$('previewFile').title=path;
+    $('previewSourceFile').textContent=$('previewFile').textContent;$('previewSourceFile').title=path;
+    this.syncReloadUI();
     try{
-      const result=await post('/api/preview/select',path?{path}:{});
+      const result=await post('/api/preview/select',{path});
       if(gen!==this.generation)return;
-      if(result.cancelled){this.status='empty';this.message('已取消载入。');this.empty('载入回放');return;}
+      if(result.cancelled){this.status='empty';this.message('已取消载入。');this.empty('重新加载预览');return;}
       this.source=result.source;this.requestedPath=this.source.replay_file;
       $('previewFile').textContent=this.source.name;$('previewFile').title=this.source.replay_file;
       $('previewSourceFile').textContent=this.source.name;$('previewSourceFile').title=this.source.replay_file;
@@ -81,7 +107,6 @@ export class ReplayPreviewPane {
       // separate so an existing compensation is not added a second time.
       try{this.offset=Number(localStorage.getItem('blitz-preview-residual-offset:'+this.source.sha256))||0;}catch{this.offset=0;}
       $('previewOffset').value=this.offset;
-      if(bind)this.adapter.bindSource(this.source);
       this.message('正在本机解析车辆运动和战斗时钟…');this.empty('正在载入回放…',{progress:.06,msg:'正在本机解析车辆运动和战斗时钟…'});
       const response=await fetch('/api/preview/replay/'+this.source.id);if(!response.ok)throw Error((await response.json()).error);
       const bytes=await response.arrayBuffer();if(gen!==this.generation)return;
@@ -90,8 +115,8 @@ export class ReplayPreviewPane {
       $('previewOffset').title='回放时钟已自动对齐；微调仅影响车辆预览，不移动镜头关键帧。';
       await post('/api/preview/prepare',{source_id:this.source.id,map_id:this.data.playback.meta.map_id,tank_ids:[...new Set(this.data.playback.vehicles.map(v=>v.tank_id))]});
       await this.waitForAssets(gen);
-    }catch(error){if(gen===this.generation){this.status='error';this.message(error.message,true);this.empty('重试载入回放',{msg:error.message,error:true});}}
-    finally{if(gen===this.generation)$('loadPreviewReplay').disabled=false;}
+    }catch(error){if(gen===this.generation){this.status='error';this.message(error.message,true);this.empty('重新加载预览',{msg:error.message,error:true});}}
+    finally{if(gen===this.generation)this.syncReloadUI();}
   }
   parse(bytes,id){
     return new Promise((resolve,reject)=>{
@@ -131,8 +156,6 @@ export class ReplayPreviewPane {
     this.orbit.addEventListener('change',()=>this.render());
     this.guides=new PreviewGuides();this.pathGroup=this.guides.root;this.scene.add(this.pathGroup);this.assetsGroup=new THREE.Group();this.scene.add(this.assetsGroup);
     this.glyphLabel=document.createElement('span');this.glyphLabel.className='preview-camera-label';this.glyphLabel.hidden=true;$('replayScene').append(this.glyphLabel);
-    $('previewEmpty').addEventListener('click',()=>{if(!$('loadPreviewReplay').disabled)$('loadPreviewReplay').click();});
-    $('previewEmpty').addEventListener('keydown',e=>{if(e.key==='Enter'&&!$('loadPreviewReplay').disabled)$('loadPreviewReplay').click();});
     $('previewOverrideReset').addEventListener('click',()=>{this.override=null;this.render();});
     this.bindPilot();
     this.bindFlight();
@@ -179,12 +202,12 @@ export class ReplayPreviewPane {
     const el=this.renderer?.domElement;
     if(!el||(!this.flightHost&&!el.requestPointerLock)){this.message('当前窗口不支持自由飞行的鼠标锁定。',true);return;}
     this.adapter.pause?.();this.ensureOverride();if(!this.override)return;
-    this.pilot=null;this.flightPending=true;this.flightKeys.clear();this.flightVelocity=[0,0,0];
+    this.pilot=null;this.flightPending=true;this.flightKeys.clear();this.flightVelocity=[0,0,0];this.flightSeek=null;
     el.tabIndex=-1;el.focus({preventScroll:true});this.syncFlightUI();
     try{
       if(this.flightHost){
         const rect=el.getBoundingClientRect(),id=++this.flightRequest;
-        this.flightHost.postMessage({command:'flight',action:'start',id,x:rect.x+rect.width/2,y:rect.y+rect.height/2});
+        this.flightHost.postMessage({command:'flight',action:'start',id,x:rect.x+rect.width/2,y:rect.y+rect.height/2,exitKey:controls().key('exitFlight'),exitMouse:controls().key('exitFlightMouse')});
         this.flightTimeout=setTimeout(()=>{if(this.flightPending&&id===this.flightRequest){this.stopFlight();this.message('未能捕获鼠标，请重新点击自由飞行。',true);}},2000);
       }else await el.requestPointerLock();
     }
@@ -192,7 +215,10 @@ export class ReplayPreviewPane {
   }
   stopFlight(){
     const hadCapture=this.flying||this.flightPending;
-    this.flying=false;this.flightPending=false;this.flightKeys.clear();this.flightVelocity=[0,0,0];
+    // Freeze time before releasing the camera: the next playback update would
+    // otherwise discard its override and restore the keyframed pose.
+    if(hadCapture)this.adapter.pause?.();
+    this.flying=false;this.flightPending=false;this.flightKeys.clear();this.flightVelocity=[0,0,0];this.flightSeek=null;
     clearTimeout(this.flightTimeout);
     if(hadCapture&&this.flightHost)this.flightHost.postMessage({command:'flight',action:'stop',id:this.flightRequest});
     cancelAnimationFrame(this.flightFrame);this.flightFrame=0;
@@ -228,18 +254,49 @@ export class ReplayPreviewPane {
       if(this.flightPending){this.stopFlight();this.message('未能锁定鼠标，请重新点击自由飞行。',true);}
     });
     document.addEventListener('pointerdown',e=>{
-      if(!this.flying||e.button!==0)return;
+      if(!this.flying){this.flightMouseConsumed=null;return;}
+      this.flightMouseConsumed={button:e.button,until:performance.now()+1000};
+      if('Mouse'+e.button!==controls().key('exitFlightMouse')){e.preventDefault();e.stopImmediatePropagation();return;}
       e.preventDefault();e.stopImmediatePropagation();this.stopFlight();
+    },true);
+    // Pointer lock restores the cursor over its old UI target on release.
+    // Consume the remainder of that click, including a right-click menu.
+    for(const name of ['pointerup','click','auxclick','contextmenu'])document.addEventListener(name,e=>{
+      const consumed=this.flightMouseConsumed;
+      if(this.flying||consumed&&e.button===consumed.button&&performance.now()<consumed.until){e.preventDefault();e.stopImmediatePropagation();}
     },true);
     document.addEventListener('keydown',e=>{
       if(!this.flying)return;
       e.preventDefault();e.stopImmediatePropagation();
-      if(e.code==='Escape'||e.code==='Tab'){this.stopFlight();return;}
-      if(/^Digit[1-9]$/.test(e.code)){this.flightSpeed=Number(e.code.at(-1));this.syncFlightUI();}
-      else this.flightKeys.add(e.code);
+      const c=controls(),chord=c.chord(e);
+      if(e.code==='Escape'||c.matches('exitFlight',e)){this.stopFlight();return;}
+      const modified=e.ctrlKey||e.metaKey||e.altKey||e.shiftKey;
+      if(e.code==='Space'){
+        if(!e.repeat&&!modified&&!this.adapter.locked()){
+          this.flightSeek=null;this.flightKeys.delete(c.key('seekBack'));this.flightKeys.delete(c.key('seekForward'));
+          this.adapter.togglePlayback?.();
+        }
+        return;
+      }
+      if(c.matches('seekBack',e)||c.matches('seekForward',e)){
+        if(!e.repeat&&!this.adapter.locked()&&!this.flightKeys.has(chord)){
+          this.flightKeys.add(chord);this.syncFlightSeek(performance.now(),true);
+        }
+        return;
+      }
+      if(c.matches('rear',e)){
+        if(!e.repeat)this.resetFlightBehindPlayer();
+        return;
+      }
+      if(c.matches('recordPreview',e)){if(!e.repeat){this.stopFlight();this.record();}return;}
+      const speed=Array.from({length:9},(_,i)=>i+1).find(i=>c.matches('speed'+i,e));
+      if(speed){this.flightSpeed=speed;this.syncFlightUI();return;}
+      if(c.schema.actions.some(a=>a.scopes.includes('flight')&&c.matches(a.id,e)))this.flightKeys.add(chord);
     },true);
     document.addEventListener('keyup',e=>{
-      if(!this.flying)return;e.preventDefault();e.stopImmediatePropagation();this.flightKeys.delete(e.code);
+      if(!this.flying)return;e.preventDefault();e.stopImmediatePropagation();
+      const before=this.seekDirection();controls().release(this.flightKeys,e.code);
+      if(before!==this.seekDirection())this.syncFlightSeek(performance.now());
     },true);
     document.addEventListener('mousemove',e=>{
       if(this.flightHost||!this.flying||document.pointerLockElement!==el)return;
@@ -253,13 +310,35 @@ export class ReplayPreviewPane {
     window.addEventListener('blur',()=>this.stopFlight());
     document.addEventListener('visibilitychange',()=>{if(document.hidden)this.stopFlight();});
   }
+  syncFlightSeek(now,step=false){
+    const direction=this.seekDirection();
+    this.flightSeek=direction?{direction,started:now,travel:0}:null;
+    if(direction&&step)this.adapter.stepTime?.(direction);
+  }
+  seekDirection(){const c=controls();return Number(c.held('seekForward',this.flightKeys))-Number(c.held('seekBack',this.flightKeys));}
+  advanceFlightSeek(now){
+    const held=this.flightSeek;if(!held)return;
+    const travel=flightSeekSeconds(Math.max(0,(now-held.started)/1000),controls().config.tuning),seconds=(travel-held.travel)*held.direction;
+    held.travel=travel;
+    if(!seconds)return;
+    const moved=this.adapter.seekTimeBy?.(seconds);
+    // Reaching either end stops seeking until a fresh direction is pressed.
+    if(Number.isFinite(moved)&&Math.abs(moved)+1e-9<Math.abs(seconds))this.flightSeek=null;
+  }
+  resetFlightBehindPlayer(){
+    if(!this.flying||!this.active||this.view!=='camera'||this.status!=='ready'||this.adapter.locked())return;
+    const frame=this.sampler?.recorderAt(this.time,this.offset),pose=cameraBehindVehicle(frame?.pose);
+    if(!pose){this.message('当前时刻没有主角的可用位置，暂时无法回到车后视角。',true);return;}
+    this.override=pose;this.flightKeys.clear();this.flightVelocity=[0,0,0];this.flightSeek=null;this.flightLast=performance.now();
+    this.message('已回到主角后方 · 可继续自由飞行');this.render();
+  }
   zoomFlight(delta){
     this.override.zoom=Math.min(90,Math.max(5,this.override.zoom*Math.exp(delta*.001)));this.render();
   }
   lookFlight(dx,dy){
     const o=this.override;if(!o)return;
     // Degrees per relative mouse count: independent of preview size, gentler on pitch.
-    const gain=.055*Math.tan(o.zoom*Math.PI/360)/Math.tan(Math.PI/6);
+    const gain=.055*controls().value('mouseSensitivity',1)*Math.tan(o.zoom*Math.PI/360)/Math.tan(Math.PI/6);
     // Positive yaw points left in the game's world-coordinate camera basis.
     o.yaw-=dx*gain;
     o.pitch=Math.max(-80,Math.min(80,o.pitch-dy*gain*.65));
@@ -268,10 +347,10 @@ export class ReplayPreviewPane {
     this.flightFrame=0;if(!this.flying)return;
     if(!this.active||this.view!=='camera'||this.status!=='ready'||this.adapter.locked()){this.stopFlight();return;}
     const dt=Math.max(0,Math.min(.05,(now-this.flightLast)/1000));this.flightLast=now;
-    const held=code=>this.flightKeys.has(code)?1:0,o=this.override,b=cameraBasis(o.yaw,o.pitch,o.roll);
-    const forward=held('KeyW')-held('KeyS'),right=held('KeyD')-held('KeyA'),up=held('KeyQ')-held('KeyE');
+    const c=controls(),held=id=>c.held(id,this.flightKeys)?1:0,o=this.override,b=cameraBasis(o.yaw,o.pitch,o.roll);
+    const forward=held('forward')-held('backward'),right=held('right')-held('left'),up=held('up')-held('down');
     const direction=b.forward.map((v,i)=>v*forward+b.right[i]*right+(i===2?up:0));
-    const length=Math.hypot(...direction),speed=FLIGHT_SPEEDS[this.flightSpeed-1];
+    const length=Math.hypot(...direction),speed=FLIGHT_SPEEDS[this.flightSpeed-1]*c.value('flightSpeedScale',1);
     // Integrate exponential acceleration exactly, independently of display refresh rate.
     const k=length>0?14:22,decay=Math.exp(-k*dt);
     for(let i=0;i<3;i++){
@@ -279,8 +358,11 @@ export class ReplayPreviewPane {
       o.position[i]+=target*dt+(old-target)*(1-decay)/k;
       this.flightVelocity[i]=target+(old-target)*decay;
     }
-    o.yaw-=(held('Numpad6')-held('Numpad4'))*30*dt;
-    o.pitch=Math.max(-80,Math.min(80,o.pitch+(held('Numpad8')-held('Numpad2'))*20*dt));
+    o.yaw-=(held('yawRight')-held('yawLeft'))*30*dt;
+    o.pitch=Math.max(-80,Math.min(80,o.pitch+(held('pitchUp')-held('pitchDown'))*20*dt));
+    // Positive roll banks the camera clockwise: its up axis tilts to the right.
+    o.roll+=(held('rollRight')-held('rollLeft'))*c.value('rollSpeed',45)*dt;
+    this.advanceFlightSeek(now);
     this.render();this.flightFrame=requestAnimationFrame(t=>this.advanceFlight(t));
   }
   pilotMove(dx,dy){
@@ -436,7 +518,7 @@ export class ReplayPreviewPane {
     const camera=this.view==='camera'?this.shot:this.observer;this.observer.aspect=w/h;this.observer.updateProjectionMatrix();this.rebuildTerrain();
     this.effects?.update(raw,camera,this.view==='camera'?Math.min(h,w*9/16):h,frames);
     this.glyphLabel.hidden=true;this.guides.glyph.visible=!!pose;
-    if(pose&&this.view==='observer'){const label=this.guides.update(this.shot,this.observer,w,h,this.time,pose.zoom);this.glyphLabel.hidden=!label.visible;this.glyphLabel.style.left=label.x+'px';this.glyphLabel.style.top=label.y+'px';this.glyphLabel.textContent=`${pose.zoom.toFixed(1)}°`;}
+    if(pose&&this.view==='observer'){const label=this.guides.update(this.shot,this.observer,w,h,this.time,pose.zoom),scale=window.BlitzUIScale||1;this.glyphLabel.hidden=!label.visible;this.glyphLabel.style.left=label.x/scale+'px';this.glyphLabel.style.top=label.y/scale+'px';this.glyphLabel.textContent=`${pose.zoom.toFixed(1)}°`;}
     this.renderer.setScissorTest(false);this.renderer.setViewport(0,0,w,h);this.renderer.clear();
     if(this.view==='camera'){
       const vw=Math.min(w,h*16/9),vh=vw*9/16,x=(w-vw)/2,y=(h-vh)/2;

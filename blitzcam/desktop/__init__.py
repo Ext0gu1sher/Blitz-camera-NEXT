@@ -44,7 +44,7 @@ def launch(project_path=None, port=0, view='overlay', owned=False):
             raise ValueError('Invalid local service URL')
         with urllib.request.urlopen(url+'api/state',timeout=2) as response:
             state=json.load(response)
-        if state.get('version') != __version__ or (explicit and Path(state['project_path']).resolve()!=target):
+        if state.get('version') != __version__ or (explicit and (not state.get('project_path') or Path(state['project_path']).resolve()!=target)):
             raise ValueError('Different workstation')
         endpoint = 'api/desktop/workbench' if view == 'workbench' else 'api/desktop/open'
         request=urllib.request.Request(url+endpoint,data=b'{}',headers={'Content-Type':'application/json'})

@@ -25,10 +25,12 @@
         <p class="seq-key-warning" data-key-warning hidden></p>`;
       root.querySelector('.seq-tools .seq-divider').insertAdjacentHTML('beforebegin',`<button data-action="copy" title="复制选中关键帧 Ctrl+C" aria-label="复制选中关键帧" disabled><svg class="ic"><use href="#i-copy"/></svg></button><button data-action="paste" title="将最近复制的关键帧粘贴到播放头 Ctrl+V · 同轨同刻覆盖" aria-label="粘贴关键帧到播放头" disabled><svg class="ic"><use href="#i-paste"/></svg></button>`);
       root.querySelector('[data-option=axis]').value=this.axis;
+      root.querySelector('[data-action=copy]').insertAdjacentHTML('beforebegin',`<button data-action="cut" title="剪切选中关键帧 Ctrl+X" aria-label="剪切选中关键帧" disabled><svg class="ic"><use href="#i-cut"/></svg></button>`);
       root.querySelector('#addKeyframeButton').addEventListener('click',()=>this.add('all'));
       this.scroll=root.querySelector('.seq-scroll');this.labels=root.querySelector('.seq-labels');this.content=root.querySelector('.seq-content');this.svg=root.querySelector('.seq-svg');this.head=root.querySelector('.seq-head');
       this.inspectorRoot=adapter.inspector||root;
       root.ownerDocument.addEventListener('copy',e=>this.onClipboardCopy(e));
+      root.ownerDocument.addEventListener('cut',e=>this.onClipboardCut(e));
       root.ownerDocument.addEventListener('paste',e=>this.onClipboardPaste(e));
       const number=(field)=>this.inspectorRoot.querySelector(`[data-field=${field}]`);
       for(const field of ['time','value'])if(number(field)&&globalThis.BlitzNumbers)BlitzNumbers.configure(number(field),{
@@ -53,7 +55,7 @@
       },true);
       root.addEventListener('keydown',e=>this.key(e));
       this.scroll.addEventListener('wheel',e=>{
-        if(e.altKey){e.preventDefault();if(this.drag)return;const anchor=e.clientX-this.scroll.getBoundingClientRect().left,now=performance.now();if(!this.wheelAnchor||now-this.wheelAnchor.now>400||Math.abs(anchor-this.wheelAnchor.anchor)>1)this.wheelAnchor={anchor,time:(this.scroll.scrollLeft+anchor-14)/this.scale};this.wheelAnchor.now=now;this.zoom(e.deltaY<0?1.2:1/1.2,anchor,this.wheelAnchor.time);return;}
+        if(e.altKey){e.preventDefault();if(this.drag)return;const anchor=(e.clientX-this.scroll.getBoundingClientRect().left)/(globalThis.BlitzUIScale||1),now=performance.now();if(!this.wheelAnchor||now-this.wheelAnchor.now>400||Math.abs(anchor-this.wheelAnchor.anchor)>1)this.wheelAnchor={anchor,time:(this.scroll.scrollLeft+anchor-14)/this.scale};this.wheelAnchor.now=now;this.zoom(e.deltaY<0?1.2:1/1.2,anchor,this.wheelAnchor.time);return;}
         e.preventDefault();this.wheelAnchor=null;
         if(e.ctrlKey||e.shiftKey){this.scroll.scrollTop+=e.deltaY;return;}
         this.scroll.scrollLeft+=e.deltaY+e.deltaX;
@@ -250,6 +252,7 @@
     updateClipboardButtons(){
       const busy=this.clipboardBusy();
       this.root.querySelector('[data-action=copy]').disabled=!Clipboard||!this.doc||busy||![...this.selected].some(id=>this.locate(id));
+      this.root.querySelector('[data-action=cut]').disabled=this.locked||this.root.querySelector('[data-action=copy]').disabled;
       this.root.querySelector('[data-action=paste]').disabled=!Clipboard||!this.doc||busy||this.locked||!this.clipboard;
     }
     copyKeyframes(){
@@ -285,6 +288,29 @@
       try{
         event.clipboardData.setData('text/plain',clipboardPrefix+JSON.stringify(payload));event.preventDefault();
       }catch{} // The in-editor copy remains available when native clipboard access is unavailable.
+    }
+    cutKeyframes(write){
+      if(!this.doc||!Clipboard||this.locked||this.clipboardBusy())return false;
+      const before=this.snapshot(),selection=new Set(this.selected),previousClipboard=this.clipboard;
+      try{
+        const speed=this.doc.speed;
+        if(!this.free()&&[speed.keyframes[0],speed.keyframes.at(-1)].some(k=>this.selected.has(k._id)))throw Error('速度曲线的首尾点需要保留，不能剪切。');
+        const payload=this.copyKeyframes();if(!payload)return false;
+        for(const row of this.rows())row.keys.splice(0,row.keys.length,...row.keys.filter(k=>!this.selected.has(k._id)));
+        Timing.boundHandles(speed);this.validate(before);
+        if(write)write(payload);
+        this.selected.clear();this.commit(before);return true;
+      }catch(error){this.doc=before;this.selected=selection;this.clipboard=previousClipboard;this.render();this.adapter.error(error.message);return false;}
+    }
+    onClipboardCut(event){
+      if(event.defaultPrevented||(!this.cutRequested&&!this.clipboardEventScope(event))||this.clipboardBusy())return;
+      if(!this.cutRequested&&!this.root.ownerDocument.getSelection()?.isCollapsed)return;
+      this.cutHandled=true;event.preventDefault();
+      this.cutKeyframes(payload=>{
+        if(!event.clipboardData)throw Error('无法写入剪贴板，关键帧未剪切。');
+        try{event.clipboardData.setData(clipboardType,JSON.stringify(payload));}catch{}
+        event.clipboardData.setData('text/plain',clipboardPrefix+JSON.stringify(payload));
+      });
     }
     onClipboardPaste(event){
       if(event.defaultPrevented||!this.clipboardEventScope(event))return;
@@ -377,6 +403,12 @@
         return;
       }
       if(name==='paste')return this.pasteKeyframes();
+      if(name==='cut'){
+        if(this.locked||this.clipboardBusy())return;
+        this.cutRequested=true;this.cutHandled=false;
+        try{this.root.ownerDocument.execCommand('cut');}catch{}finally{this.cutRequested=false;}
+        if(!this.cutHandled)this.cutKeyframes();return;
+      }
       if(name==='workfit'){const map=this.map(),from=this.displayTime(map.workStart,map),to=this.displayTime(map.workEnd,map);this.scale=clamp((this.scroll.clientWidth-32)/Math.max(.5,to-from),.1,2000);this.render();this.scroll.scrollLeft=from*this.scale;return;}
       if(name==='follow'){const t=this.adapter.currentTime?.();if(Number.isFinite(t)){this.adapter.seek(t);this.scroll.scrollLeft=Math.max(0,this.x(t)-this.scroll.clientWidth/2);}else this.adapter.error('连接回放后可查看当前对局时刻。');return;}
       if(name==='fit')return this.fit();if(name==='in'||name==='out')return this.zoom(name==='in'?1.25:.8);
@@ -430,7 +462,7 @@
       return targets;
     }
     snapTo(time,targets){let best=null;for(const t of targets){const dist=Math.abs(t-time)*this.scale;if(dist<10&&(!best||dist<best.dist))best={time:t,dist};}return best;}
-    point(e){const r=this.scroll.getBoundingClientRect();return {x:e.clientX-r.left+this.scroll.scrollLeft,y:e.clientY-r.top+this.scroll.scrollTop};}
+    point(e){const r=this.scroll.getBoundingClientRect(),scale=globalThis.BlitzUIScale||1;return {x:(e.clientX-r.left)/scale+this.scroll.scrollLeft,y:(e.clientY-r.top)/scale+this.scroll.scrollTop};}
     down(e){
       this.wheelAnchor=null;
       if(e.button!==0||!this.doc||e.target.closest('input,select,button'))return;
@@ -623,9 +655,10 @@
       if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();e.stopPropagation();this.action('delete');}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();this.selected=new Set(this.rows().filter(r=>r.name!=='rate').flatMap(r=>r.keys.map(k=>k._id)));this.render();}
       if(e.key==='Escape'&&!this.locked){const work=this.drag?.kind==='work';this.cancel();if(!work)this.selected.clear();this.render();}
-      if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+      if(globalThis.BlitzControls?.matches('seekBack',e)||globalThis.BlitzControls?.matches('seekForward',e)){
         e.preventDefault();e.stopPropagation();const map=this.map();
-        this.adapter.seek(this.free()?Math.max(0,this.playhead+(e.key==='ArrowRight'?1:-1)/this.fps):this.axis==='replay'?clamp(this.playhead+(e.key==='ArrowRight'?1:-1)/this.fps,map.start,map.end):map.atSeconds(map.atTime(this.playhead)+(e.key==='ArrowRight'?1:-1)/this.fps));
+        const direction=globalThis.BlitzControls.matches('seekForward',e)?1:-1;
+        this.adapter.seek(this.free()?Math.max(0,this.playhead+direction/this.fps):this.axis==='replay'?clamp(this.playhead+direction/this.fps,map.start,map.end):map.atSeconds(map.atTime(this.playhead)+direction/this.fps));
       }
     }
     lock(value){if(this.locked===!!value)return;if(value&&this.numberEdit){globalThis.BlitzNumbers?.finish(true);this.endNumberEdit(true);}this.locked=!!value;if(this.locked)this.cancel();this.root.classList.toggle('seq-locked',this.locked);this.render();}

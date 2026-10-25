@@ -94,7 +94,7 @@ const out=path.resolve('output/replay-preview-091-acceptance');fs.mkdirSync(out,
   await restoredPage.close();
   let secondMap=null;
   if(process.argv[3]){
-    await page.evaluate(file=>replayPreviewPane.select(file),process.argv[3]);
+    await page.evaluate(async path=>applyReplayInfo(await api('/api/replay/timeline',{path})),process.argv[3]);
     await page.waitForFunction(()=>replayPreviewPane.status==='ready'||replayPreviewPane.status==='error',{},{timeout:240000});
     assert.equal(await page.evaluate(()=>replayPreviewPane.status),'ready',await page.locator('#previewStatus').innerText());
     const changed=await page.evaluate(()=>{seek(60);return BlitzReplayPreviewDiagnostics();});

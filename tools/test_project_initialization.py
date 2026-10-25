@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp, patch('blitzcam.server.OUTPUT', Path(tmp)):
+    with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp, patch('blitzcam.server.OUTPUT', Path(tmp)), \
+         patch('blitzcam.settings.documents_directory', return_value=Path(tmp)/'Documents'):
         app = Workstation(Path(tmp)/'initial.json')
         app.stop.set(); app.poller.join()
         app.new_project_file('initial')

@@ -25,6 +25,7 @@ class FeedbackControlsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.out = Path(self.tmp.name)
         self.patchers = [patch('blitzcam.server.OUTPUT', self.out),
+                         patch('blitzcam.settings.documents_directory', return_value=self.out/'Documents'),
                          patch('blitzcam.replay_preview.OUTPUT', self.out)]
         for patcher in self.patchers:patcher.start()
         self.app = Workstation(self.out/'project.json')

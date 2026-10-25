@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createReplaySampler,validatePlayback} from '../../blitzcam/web/replay-preview-core.js';
+import {createReplaySampler,validatePlayback,cameraBehindVehicle,cameraBasis} from '../../blitzcam/web/replay-preview-core.js';
 
 const samples=31,zero=()=>Array(samples).fill(0);
 const vehicle=(eid,account)=>({eid,account_id:account,tank_id:6929,
@@ -88,4 +88,33 @@ for(const corrupt of [
   corrupt(bundle.playback.vehicles[0]);
   assert.throws(()=>createReplaySampler(bundle,origin));
 }
+// X returns to the recorder at the displayed clock, never the first/nearest tank.
+const rearBundle=structuredClone(base);rearBundle.result.author_account_id=2;
+const rearSampler=createReplaySampler(rearBundle,origin),beforeRear=structuredClone(rearBundle);
+for(const raw of [40,41.2,42.8,40.5]){
+  const frame=rearSampler.recorderAt(raw-origin-.2,.2);
+  assert.equal(frame.eid,8);
+  assert.deepEqual(frame,rearSampler.at(raw-origin).find(f=>f.eid===8));
+}
+assert.equal(rearSampler.recorderAt(39-origin),null);
+assert.equal(rearSampler.recorderAt(44-origin),null);
+assert.deepEqual(rearBundle,beforeRear);
+delete rearBundle.result.author_account_id;
+assert.equal(createReplaySampler(rearBundle,origin).recorderAt(41-origin),null);
+rearBundle.result.author_account_id=2;rearBundle.playback.vehicles[1].death_t=40.5;
+assert.equal(createReplaySampler(rearBundle,origin).recorderAt(44-origin).eid,8,'destroyed recorder uses the displayed wreck');
+rearBundle.ai.rosters[1].team=1;
+assert.equal(createReplaySampler(rearBundle,origin).recorderAt(41-origin),null,'conflicting identity cannot select another tank');
+for(const yaw of [0,Math.PI/2,Math.PI,-Math.PI/2,Math.PI*5.7]){
+  const vehiclePose={x:100,y:7,z:200,yaw},saved={...vehiclePose},camera=cameraBehindVehicle(vehiclePose);
+  const heading=[Math.sin(yaw),Math.cos(yaw)],delta=[camera.position[0]-100,camera.position[1]-200];
+  assert.ok(delta[0]*heading[0]+delta[1]*heading[1]<0,'camera must be behind the hull');
+  assert.ok(Math.abs(delta[0]*heading[1]-delta[1]*heading[0])<1e-9,'camera must be centered behind the hull');
+  assert.ok(camera.position[2]>vehiclePose.y);
+  const f=cameraBasis(camera.yaw,camera.pitch,camera.roll).forward;
+  assert.ok(f[0]*heading[0]+f[1]*heading[1]>.9,'camera must face along the hull');
+  assert.ok(f[2]<0);assert.equal(camera.roll,0);assert.equal(camera.zoom,54);
+  assert.deepEqual(vehiclePose,saved);
+}
+for(const pose of [null,{}, {x:0,y:NaN,z:0,yaw:0}])assert.equal(cameraBehindVehicle(pose),null);
 console.log(JSON.stringify({passed:true}));

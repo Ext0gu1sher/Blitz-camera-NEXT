@@ -78,20 +78,14 @@ def recent_listing():
 
 
 def startup_project():
-    for entry in read_recent():
-        p = Path(entry['path'])
-        if p.is_file():
-            return p
-    settings=read_settings(OUTPUT)
-    if settings['project_directory']!=settings['default_project_directory']:
-        return Path(settings['project_directory'])/'project.json'
-    return OUTPUT/'project.json'
+    # A normal launch opens Home. Projects are created/opened explicitly.
+    return None
 
 
 class Workstation:
-    def __init__(self, project_path):
-        self.project_path = Path(project_path).resolve()
-        self.project = read_project(self.project_path if self.project_path.exists() else ROOT/"examples/eight-second.json")
+    def __init__(self, project_path=None):
+        self.project_path = Path(project_path).resolve() if project_path is not None else None
+        self.project = read_project(self.project_path if self.project_path.exists() else ROOT/"examples/eight-second.json") if self.project_path is not None else None
         self.lock, self.stop = threading.RLock(), threading.Event()
         self.session, self.sample = None, None
         self.replay_info = None
@@ -101,13 +95,13 @@ class Workstation:
         self.connection = {"state": "disconnected", "message": "离线模式 · 可编辑与预演。连接只读取当前暂停的回放。"}
         self.generation = 0
         self.project_revision = 0
-        self.editor_state = read_editor_state(OUTPUT, self.project_path)
+        self.editor_state = read_editor_state(OUTPUT, self.project_path) if self.project_path else None
         self.terrain = TerrainStore()
         self.replay_preview = ReplayPreview()
-        self.selected_time = self.project.keyframes[0].time_sec
+        self.selected_time = self.project.keyframes[0].time_sec if self.project else 0
         self.desktop_process = None
         self.playback = PositionPlayback(OUTPUT/'playback-runs')
-        if self.project_path.exists():
+        if self.project_path and self.project_path.exists():
             record_recent(self.project_path)
         self.poller = threading.Thread(target=self._poll, daemon=True); self.poller.start()
 
@@ -118,9 +112,11 @@ class Workstation:
                              "replay_launch": self.replay_launch,
                              "keyframe_guard": self.keyframe_guard(),
                              "replay_keyframe_start_seconds": read_settings(OUTPUT)['replay_keyframe_start_seconds'],
-                             "project": self.project.to_dict(), "keyframe_controls": controls(self.project),
-                             "camera_track_controls": track_controls(self.project),
-                             "project_path": str(self.project_path), "project_name": self.project_path.stem,
+                             "ui_scale": read_settings(OUTPUT)['ui_scale'],
+                             "input_controls": read_settings(OUTPUT)['input_controls'],
+                             "project": self.project.to_dict() if self.project else None, "keyframe_controls": controls(self.project) if self.project else [],
+                             "camera_track_controls": track_controls(self.project) if self.project else {},
+                             "project_path": str(self.project_path) if self.project_path else None, "project_name": self.project_path.stem if self.project_path else None,
                              "playback": self.playback.state(),
                              "version": __version__, "project_revision": self.project_revision,
                              "ui": {"selected_time": self.selected_time},
@@ -132,6 +128,7 @@ class Workstation:
 
     def connect(self):
         with self.lock:
+            self.require_project()
             if self.replay_launch['state'] in ('choosing', 'launching'):
                 raise CameraError('请先完成回放文件选择与启动。')
             if self.connection["state"] == "connecting":
@@ -368,6 +365,10 @@ class Workstation:
         if expected is not None and (type(expected) is not int or expected != self.project_revision):
             raise ValueError('项目已在其他窗口更新，请载入最新项目后重试。')
 
+    def require_project(self):
+        if self.project is None or self.project_path is None:
+            raise ValueError('请先在主页新建或打开项目。')
+
     def select_keyframe(self, time_sec):
         with self.lock:
             if isinstance(time_sec, bool) or not isinstance(time_sec, (int, float)) or not math.isfinite(time_sec):
@@ -378,6 +379,7 @@ class Workstation:
 
     def set_project(self, project, expected_revision=None):
         with self.lock:
+            self.require_project()
             self.check_revision(expected_revision)
             if self.playback.state()['active']:
                 raise CameraError('运镜期间请先停止，再编辑或记录属性关键帧。')
@@ -415,7 +417,7 @@ class Workstation:
 
     def keyframe_guard(self, timeline=None):
         from .replay_timeline import replay_keyframe_guard
-        if self.project.shooting_mode == 'camera_only' and timeline is None:
+        if self.project is None or (self.project.shooting_mode == 'camera_only' and timeline is None):
             return {'enabled': False, 'start_sec': None, 'source': 'camera_only', 'status': 'disabled', 'message': ''}
         timeline = timeline if timeline is not None else self.project.replay_timeline
         return replay_keyframe_guard(timeline, read_settings(OUTPUT), self._keyframe_metadata(timeline))
@@ -431,6 +433,7 @@ class Workstation:
 
     def capture_hotkey(self):
         with self.lock:
+            self.require_project()
             timeline = (self.editor_state or {}).get('timeline') or {}
             when = timeline.get('playhead', self.selected_time) if self.project.shooting_mode == 'camera_only' else 0
             self.capture(when)
@@ -846,6 +849,9 @@ def make_handler(workstation):
                       "/replay-open.css": ("replay-open.css", "text/css; charset=utf-8"),
                       "/terrain-preview.js": ("terrain-preview.js", "text/javascript; charset=utf-8"),
                       "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                      "/controls.js": ("controls.js", "text/javascript; charset=utf-8"),
+                      "/control-settings.js": ("control-settings.js", "text/javascript; charset=utf-8"),
+                      "/control-schema.json": ("control-schema.json", "application/json; charset=utf-8"),
                       "/editor-session.js": ("editor-session.js", "text/javascript; charset=utf-8"),
                       "/style.css": ("style.css", "text/css; charset=utf-8")}
             if path in assets:
@@ -866,6 +872,12 @@ def make_handler(workstation):
                 if not isinstance(data, dict):
                     raise ValueError("请求需为对象。")
                 path = urlsplit(self.path).path
+                if workstation.project is None and path not in {
+                    '/api/settings', '/api/settings/directory', '/api/projects/new', '/api/projects/open',
+                    '/api/projects/forget', '/api/projects/delete', '/api/desktop/open', '/api/desktop/workbench',
+                    '/api/disconnect', '/api/playback/stop',
+                }:
+                    workstation.require_project()
                 if path == "/api/connect": workstation.connect()
                 elif path == '/api/settings':
                     with workstation.lock:
@@ -877,6 +889,9 @@ def make_handler(workstation):
                     except ValueError: initial=Path(read_settings(OUTPUT)['project_directory'])
                     selected=replay_launcher.choose_directory(initial)
                     self._send(200,{'cancelled':True} if selected is None else {'path':str(selected)}); return
+                elif path == '/api/replay/select':
+                    selected = replay_launcher.choose_replay()
+                    self._send(200, {'cancelled': True} if selected is None else {'info': file_timeline(selected)}); return
                 elif path == '/api/replay/open': workstation.open_replay(data.get('path'))
                 elif path == '/api/replay/open_project': workstation.open_project_replay()
                 elif path == '/api/replay/timeline':
@@ -991,7 +1006,7 @@ def serve(project_path=None, port=0, open_browser=True, desktop=False, desktop_v
     server.daemon_threads = True
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     service_file = OUTPUT/'workstation-service.json'
-    atomic_json(service_file, {'url':url, 'pid':os.getpid(), 'version':__version__, 'project_path':str(workstation.project_path)})
+    atomic_json(service_file, {'url':url, 'pid':os.getpid(), 'version':__version__, 'project_path':str(workstation.project_path) if workstation.project_path else None})
     print(f"Blitz Camera Lab {__version__} — {url}", flush=True)
     print("仅本机访问；连接只读取游戏，游戏内播放才接管位置。关闭服务会请求停止运镜。", flush=True)
     if open_browser: webbrowser.open(url)

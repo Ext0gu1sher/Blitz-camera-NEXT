@@ -11,20 +11,23 @@ fs.mkdirSync(out,{recursive:true});
   await page.goto(base+'/');await page.waitForSelector('.seq-key[data-channel=x]');await enterFixture(page);
   const state=async()=>(await page.request.get(base+'/api/state')).json(),before=await state();
   const keys=before.project.camera_tracks;
-  // Preserve an unsaved edit while the backend binds a new replay source.
+  // Preserve an unsaved edit while choosing a source, then launch it separately.
   await page.locator('.seq-key[data-channel=x]').nth(1).click();
   await page.locator('[data-field=value]').locator('..').locator('.number-value').dblclick();await page.locator('[data-field=value]').fill('77');await page.locator('[data-field=value]').press('Enter');
   await page.locator('#openReplayButton').click();
   await page.waitForFunction(()=>document.querySelector('#openReplayButton').textContent.includes('选择回放中'));
   assert.equal(await page.locator('#openReplayButton').isDisabled(),true);
+  await page.waitForFunction(path=>state.timeline?.replay_file===path&&!state.busy,chosen);
+  assert.notEqual((await state()).replay_launch.state,'launched');
+  await page.locator('#playProjectReplay').click();
   await page.waitForFunction(()=>document.querySelector('#openedReplayFile').textContent.includes('307.500'));
   await page.waitForFunction(()=>Number(document.querySelector('#timelineSlider').max)===307.5);
   assert.equal((await state()).replay_launch.state,'launched');
   assert.equal((await state()).replay_launch.verified,false);
-  assert.deepEqual((await state()).project.camera_tracks,keys);
+  keys.x[1].value=77;assert.deepEqual((await state()).project.camera_tracks,keys);
   assert.equal((await state()).project.replay_timeline.replay_file,chosen);
   assert.equal(Number(await page.locator('[data-field=value]').inputValue()),77);
-  assert.equal(await page.locator('#externalChange').isVisible(),true);
+  assert.equal(await page.locator('#externalChange').isVisible(),false);
   await page.locator('.connection-panel').screenshot({path:path.join(out,'open-file-workbench.png')});
   // Reload sees the source and full length saved by the launch action.
   await page.reload();await page.waitForSelector('.seq-key[data-channel=x]').catch(async error=>{
@@ -92,9 +95,9 @@ fs.mkdirSync(out,{recursive:true});
   await playing.waitForFunction(()=>typeof model!=='undefined'&&model.ready);
   assert.equal(await playing.evaluate(()=>{const b=document.getElementById('liveSeekStart');return !b.hidden&&b.disabled;}),true);
   // The workbench picker's cancel remains non-destructive.
-  await page.locator('#openReplayButton').click();
-  for(let i=0;i<60&&(await state()).replay_launch.state!=='cancelled';i++)await page.waitForTimeout(100);
-  assert.equal((await state()).replay_launch.state,'cancelled');
+  const launchBeforeCancel=(await state()).replay_launch;
+  await page.locator('#openReplayButton').click();await page.waitForFunction(()=>!state.selectingReplay&&!state.busy);
+  assert.deepEqual((await state()).replay_launch,launchBeforeCancel);
   assert.deepEqual((await state()).project,after);
   assert.equal((await state()).playback.active,false);
   // A service restart has no in-memory launch ticket; still show the source

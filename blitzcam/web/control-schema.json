@@ -1,0 +1,361 @@
+{
+  "actions": [
+    {
+      "id": "forward",
+      "label": "前进",
+      "key": "KeyW",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "backward",
+      "label": "后退",
+      "key": "KeyS",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "left",
+      "label": "左移",
+      "key": "KeyA",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "right",
+      "label": "右移",
+      "key": "KeyD",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "up",
+      "label": "上升",
+      "key": "KeyQ",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "down",
+      "label": "下降",
+      "key": "KeyE",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "rollLeft",
+      "label": "逆时针横滚",
+      "key": "KeyZ",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "rollRight",
+      "label": "顺时针横滚",
+      "key": "KeyC",
+      "group": "移动与横滚",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "yawLeft",
+      "label": "向左转向",
+      "key": "Numpad4",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "yawRight",
+      "label": "向右转向",
+      "key": "Numpad6",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "pitchUp",
+      "label": "向上俯仰",
+      "key": "Numpad8",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "pitchDown",
+      "label": "向下俯仰",
+      "key": "Numpad2",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "rear",
+      "label": "回到主角背后",
+      "key": "KeyX",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "enterFlight",
+      "label": "进入自由飞行",
+      "key": null,
+      "group": "镜头与机位",
+      "scopes": [
+        "editor"
+      ]
+    },
+    {
+      "id": "exitFlight",
+      "label": "保留机位并退出（键盘）",
+      "key": "Tab",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "exitFlightMouse",
+      "label": "保留机位并退出（鼠标）",
+      "key": "Mouse0",
+      "group": "镜头与机位",
+      "scopes": [
+        "flight"
+      ],
+      "mouse": true
+    },
+    {
+      "id": "recordPreview",
+      "label": "将预览机位记录为关键帧",
+      "key": null,
+      "group": "镜头与机位",
+      "scopes": [
+        "editor",
+        "flight"
+      ]
+    },
+    {
+      "id": "speed1",
+      "label": "飞行速度 1 档",
+      "key": "Digit1",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed2",
+      "label": "飞行速度 2 档",
+      "key": "Digit2",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed3",
+      "label": "飞行速度 3 档",
+      "key": "Digit3",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed4",
+      "label": "飞行速度 4 档",
+      "key": "Digit4",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed5",
+      "label": "飞行速度 5 档",
+      "key": "Digit5",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed6",
+      "label": "飞行速度 6 档",
+      "key": "Digit6",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed7",
+      "label": "飞行速度 7 档",
+      "key": "Digit7",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed8",
+      "label": "飞行速度 8 档",
+      "key": "Digit8",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "speed9",
+      "label": "飞行速度 9 档",
+      "key": "Digit9",
+      "group": "飞行速度",
+      "scopes": [
+        "flight"
+      ]
+    },
+    {
+      "id": "seekBack",
+      "label": "时间后退（飞行时长按加速）",
+      "key": "ArrowLeft",
+      "group": "时间轴",
+      "scopes": [
+        "flight",
+        "editor"
+      ]
+    },
+    {
+      "id": "seekForward",
+      "label": "时间前进（飞行时长按加速）",
+      "key": "ArrowRight",
+      "group": "时间轴",
+      "scopes": [
+        "flight",
+        "editor"
+      ]
+    },
+    {
+      "id": "snap",
+      "label": "开关时间轴吸附",
+      "key": "KeyS",
+      "group": "时间轴",
+      "scopes": [
+        "editor"
+      ]
+    },
+    {
+      "id": "workStart",
+      "label": "设置工作区起点",
+      "key": "KeyI",
+      "group": "时间轴",
+      "scopes": [
+        "editor"
+      ]
+    },
+    {
+      "id": "workEnd",
+      "label": "设置工作区终点",
+      "key": "KeyO",
+      "group": "时间轴",
+      "scopes": [
+        "editor"
+      ]
+    },
+    {
+      "id": "jumpStart",
+      "label": "跳到工作区起点",
+      "key": "Shift+KeyI",
+      "group": "时间轴",
+      "scopes": [
+        "editor"
+      ]
+    },
+    {
+      "id": "jumpEnd",
+      "label": "跳到工作区终点",
+      "key": "Shift+KeyO",
+      "group": "时间轴",
+      "scopes": [
+        "editor"
+      ]
+    }
+  ],
+  "tuning": [
+    {
+      "id": "mouseSensitivity",
+      "label": "鼠标转向灵敏度",
+      "value": 1,
+      "min": 0.1,
+      "max": 5,
+      "step": 0.1,
+      "unit": "倍"
+    },
+    {
+      "id": "rollSpeed",
+      "label": "横滚速度",
+      "value": 45,
+      "min": 5,
+      "max": 180,
+      "step": 5,
+      "unit": "°/秒"
+    },
+    {
+      "id": "flightSpeedScale",
+      "label": "整体飞行速度",
+      "value": 1,
+      "min": 0.1,
+      "max": 5,
+      "step": 0.1,
+      "unit": "倍"
+    },
+    {
+      "id": "seekDelay",
+      "label": "长按时间跳转的起步等待",
+      "value": 0.25,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "unit": "秒"
+    },
+    {
+      "id": "seekRamp",
+      "label": "时间跳转加速到上限所需时间",
+      "value": 3,
+      "min": 0.25,
+      "max": 10,
+      "step": 0.25,
+      "unit": "秒"
+    },
+    {
+      "id": "seekMax",
+      "label": "时间跳转最高倍率",
+      "value": 64,
+      "min": 2,
+      "max": 256,
+      "step": 1,
+      "unit": "倍"
+    }
+  ]
+}

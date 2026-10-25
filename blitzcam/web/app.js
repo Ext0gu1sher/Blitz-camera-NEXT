@@ -7,7 +7,7 @@ const state = {
   speedRange:null,
   connection: {state: "disconnected", message: ""}, sample: null, serviceReady: false, playback: {active:false,state:"idle"},
   controls: [], savedControls: [], project: null, projectHash: null, pendingProject: null,
-  dirty: false, busy: false, loaded: false, captureTimeEdited: false,
+  dirty: false, busy: false, loaded: false, captureTimeEdited: false, selectingReplay: false,
   samples: [], previewTime: 0, playing: false, loop: false, playbackAnchor: 0,
   playbackStart: 0, previewRate: 60, view: "3d", yaw: -0.58, elevation: 0.65,
   zoom: 1, pan: [0, 0], center: [0, 0, 0], baseScale: 20, extent: 20,
@@ -20,6 +20,15 @@ let replayPreviewPane=null;
 let autoSaveTimer=null,autoSavePromise=null,editorSavePromise=null,pendingEditorRestore=null,pendingPreviewRestore=null,lastEditorSignature='';
 let lastEditorError='';
 let applicationSettings=null,settingsLoading=false;
+const inputControls=window.BlitzControls;
+let settingsSection='general';
+const controlsEditor=inputControls.createSettings(()=>updateControlsSettings());
+function applyUIScale(percent=100){
+  const scale=[100,110,125,150,175,200].includes(percent)?percent/100:1;
+  if(window.BlitzUIScale===scale)return;
+  window.BlitzUIScale=scale;document.documentElement.style.setProperty('--ui-scale',scale);
+  requestAnimationFrame(()=>{resizeCanvas();drawCanvas();sequenceEditor?.render();speedCurveEditor?.refresh();replayPreviewPane?.render();});
+}
 let nativeHostState=null;
 let globalKeysEdited=false;
 let startupServiceError='',startupSamples={ready:false,error:''};
@@ -33,10 +42,13 @@ function syncReplayPreview(){
 function mountReplayPreview(){
   if(replayPreviewPane||!window.BlitzReplayPreview)return;
   replayPreviewPane=window.BlitzReplayPreview.mount({
-    locked:()=>state.busy||state.playback.active||!state.serviceReady,
+    locked:()=>state.busy||state.playback.active||!state.serviceReady||['choosing','launching'].includes(state.replayLaunch?.state)||state.connection.state==='connecting',
     pause:()=>stopPlayback(),
+    togglePlayback:()=>play(),
+    stepTime:direction=>seek(state.previewTime+direction/state.previewRate),
+    seekTimeBy:seconds=>{const before=state.previewTime;seek(before+seconds);return state.previewTime-before;},
+    selectReplay:()=>selectProjectReplay(),
     ready:()=>restorePreviewSession(),
-    bindSource:info=>{stopPlayback();if(!applyReplayInfo(info))throw Error('所选回放未能绑定现有时间轴。请先检查关键帧是否超出新回放长度。');notify('预览已绑定所选回放。');},
     record:(pose,time)=>{
       if(isCameraOnly()||state.busy||state.playback.active)return;
       stopPlayback();const values={x:pose.position[0],y:pose.position[1],z:pose.position[2],yaw:pose.yaw,pitch:pose.pitch,roll:pose.roll,zoom:pose.zoom};
@@ -138,15 +150,18 @@ async function api(path, body, opts = {}) {
 function updateButtons() {
   const live = state.playback.active === true;
   const opening = ['choosing','launching'].includes(state.replayLaunch?.state);
-  const editing = state.busy || live || opening;
+  const editing = state.busy || live || opening || !state.project;
   const connecting = state.connection.state === "connecting";
   const connected = state.connection.state === "connected";
   $("openReplayButton").disabled = editing || connecting || !state.serviceReady;
-  $("openReplayButton").querySelector("[data-label]").textContent = opening ? (state.replayLaunch.state==='choosing'?'选择回放中…':'正在启动游戏…') : '打开回放文件…';
-  $("openReplayButton").title = opening ? "正在打开回放" : "打开回放文件";
   const boundReplay=state.timeline?.replay_file;
+  const selectLabel=state.selectingReplay?'选择回放中…':boundReplay?'更换回放文件…':'选择回放文件…';
+  $("openReplayButton").querySelector("[data-label]").textContent=selectLabel;
+  $("openReplayButton").title=selectLabel;
+  $("openReplayButton").setAttribute('aria-label',selectLabel);
   $("playProjectReplay").disabled=editing||connecting||!state.serviceReady||!boundReplay;
   $("playProjectReplay").title=opening?'正在打开回放':boundReplay?`在游戏中播放项目回放 · ${boundReplay.split(/[\\/]/).at(-1)}`:'当前项目尚未绑定回放';
+  replayPreviewPane?.syncReloadUI();
   $("connectButton").disabled = state.busy || opening || connecting || connected || !state.serviceReady;
   $("disconnectButton").disabled = state.busy || (!connected && !connecting && !live);
   const hasCamera = !!state.sample?.camera;
@@ -193,6 +208,8 @@ function updateButtons() {
 }
 
 function updateTelemetry(data) {
+  applyUIScale(data.ui_scale??100);
+  inputControls.apply(data.input_controls);
   const previousPlayback=state.playback;
   state.playback = data.playback || {state:"idle",active:false};
   const live = state.playback;
@@ -291,8 +308,18 @@ function setDirty(dirty) {
 
 function loadProject(data) {
   const switched=state.projectPath!==data.project_path;
+  if(!data.project){
+    stopPlayback();clearTimeout(autoSaveTimer);clearTimeout(draftTimer);state.previewSequence++;
+    state.projectPath=null;state.project=null;state.projectHash='null';state.pendingProject=null;
+    state.controls=[];state.savedControls=[];state.tracks=null;state.timeline=null;state.samples=[];
+    state.loaded=true;state.previewTime=0;pendingEditorRestore=null;pendingPreviewRestore=null;
+    sequenceEditor.doc=null;sequenceEditor.selected.clear();replayPreviewPane?.clear();
+    $('projectName').textContent='未打开项目';$('externalChange').hidden=true;
+    startupSamples={ready:true,error:''};setDirty(false);showHome(true);return;
+  }
   state.projectPath=data.project_path;
   if(switched){
+    speedCurveEditor?.resetView();
     state.appliedLaunchId=data.replay_launch?.state==='launched'?data.replay_launch.id:null;
     const saved=BlitzEditorSession.newest(data.editor_state,BlitzEditorSession.readLocal(localStorage,state.projectPath));
     pendingEditorRestore=saved||null;pendingPreviewRestore=saved?.preview||null;lastEditorSignature='';
@@ -809,7 +836,7 @@ document.addEventListener("keydown", event => {
   if(window.BlitzStartup?.active)return;
   if(state.settingsOpen){
     if(event.key==='Escape'&&!state.busy){event.preventDefault();closeSettings();}
-    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();if(!$('settingsSave').disabled)$('settingsForm').requestSubmit();}
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();const id=settingsSection==='controls'?'controls':'settings';if(!$(id+'Save').disabled)$(id+'Form').requestSubmit();}
     return;
   }
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){
@@ -822,21 +849,25 @@ document.addEventListener("keydown", event => {
     if(k==='z'&&!event.shiftKey&&window.BlitzNumbers?.active){BlitzNumbers.finish(true,true);return;}
     window.BlitzNumbers?.finish();finishEaseDrag?.(false);if(textEntry)event.target.blur();stopPlayback();sequenceEditor?.action(k==='y'||event.shiftKey?'redo':'undo');return;
   }
-  if (event.target.closest('input,select,textarea,button,[contenteditable=true]')) return;
-  if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&k==='s'&&!event.repeat){event.preventDefault();sequenceEditor?.action('snap');return;}
-  if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&(k==='i'||k==='o')&&!isCameraOnly()){
+  if (event.target.closest('input,select,textarea,[contenteditable=true]')||state.home) return;
+  if(inputControls.matches('enterFlight',event)){event.preventDefault();if(!event.repeat)replayPreviewPane?.startFlight();return;}
+  if(inputControls.matches('recordPreview',event)){event.preventDefault();if(!event.repeat)replayPreviewPane?.record();return;}
+  if(inputControls.matches('snap',event)&&!event.repeat){event.preventDefault();sequenceEditor?.action('snap');return;}
+  const workAction=['workStart','workEnd','jumpStart','jumpEnd'].find(id=>inputControls.matches(id,event));
+  if(workAction&&!isCameraOnly()){
     const t=sequenceEditor?.doc?.timeline;if(!t)return;
-    if(event.shiftKey){if(!event.repeat)seek(k==='i'?t.work_start_sec:t.work_end_sec);return;}
+    event.preventDefault();
+    if(workAction.startsWith('jump')){if(!event.repeat)seek(workAction==='jumpStart'?t.work_start_sec:t.work_end_sec);return;}
     if(event.repeat)return;
     event.preventDefault();
     sequenceEditor.edit(()=>{
       const h=Math.max(0,Math.min(t.duration_sec,sequenceEditor.playhead));
-      if(k==='i'){t.work_start_sec=h;if(t.work_start_sec>=t.work_end_sec)t.work_end_sec=Math.min(t.duration_sec,t.work_start_sec+0.001);}
+      if(workAction==='workStart'){t.work_start_sec=h;if(t.work_start_sec>=t.work_end_sec)t.work_end_sec=Math.min(t.duration_sec,t.work_start_sec+0.001);}
       else{t.work_end_sec=h;if(t.work_end_sec<=t.work_start_sec)t.work_start_sec=Math.max(0,t.work_end_sec-0.001);}
     });return;
   }
-  if (event.code === "Space") { event.preventDefault(); play(); }
-  if (event.code === "ArrowLeft" || event.code === "ArrowRight") { event.preventDefault(); seek(state.previewTime + (event.code === "ArrowRight" ? 1 : -1) / state.previewRate); }
+  if (event.code === "Space"&&!event.target.closest('button')) { event.preventDefault(); if(!event.repeat)play(); }
+  if (inputControls.matches('seekBack',event)||inputControls.matches('seekForward',event)) { event.preventDefault(); seek(state.previewTime + (inputControls.matches('seekForward',event) ? 1 : -1) / state.previewRate); }
 });
 window.addEventListener("beforeunload", event => {persistEditorSession(true,true);if(state.dirty){event.preventDefault();event.returnValue="";} });
 window.addEventListener('pagehide',()=>persistEditorSession(true,true));
@@ -985,21 +1016,38 @@ const projectNumber=input=>input.closest('#keyInspector,#paneSpeed,.ce-grid2,#sp
 document.addEventListener('number-start',event=>{if(projectNumber(event.target)){stopPlayback();sequenceEditor.beginNumberEdit();}});
 document.addEventListener('number-end',event=>{if(projectNumber(event.target)){sequenceEditor.endNumberEdit(event.detail.cancelled);renderSpeedRows();}});
 $("readReplayFile").onclick=async()=>{let info;await action(async()=>{info=await api('/api/replay/timeline',{path:$("replayFilePath").value.trim()});});if(info)applyReplayInfo(info);};
-$("openReplayButton").onclick=()=>action(async()=>{await api('/api/replay/open',{});await refreshState();});
+async function selectProjectReplay(){
+  if($("openReplayButton").disabled)return;
+  const projectPath=state.projectPath;let info;
+  state.selectingReplay=true;
+  try{
+    await action(async()=>{
+      stopPlayback();
+      const result=await api('/api/replay/select',{}, {timeout:0});
+      if(!result.cancelled)info=result.info;
+    });
+  }finally{state.selectingReplay=false;updateButtons();}
+  if(!info||state.projectPath!==projectPath)return;
+  if(applyReplayInfo(info))notify(`已选择回放：${info.name}`);
+}
+$("openReplayButton").onclick=selectProjectReplay;
 $("playProjectReplay").onclick=()=>action(async()=>{
   const path=state.timeline?.replay_file;
   if(!path)throw new Error('当前项目尚未绑定回放，请先载入回放。');
+  if(autoSavePromise)await autoSavePromise;
+  if(state.dirty)await saveProject();
   await api('/api/replay/open_project',{});await refreshState();
 });
 $("useCurrentReplay").onclick=()=>{if(!state.replayInfo)return notify('未取得启动回放文件，请填写回放文件路径读取长度。',true);applyReplayInfo(state.replayInfo);};
 function applyReplayInfo(info){
-  if(isCameraOnly())return false;
-  const previous=sequenceEditor.doc.timeline,fit=previous.replay_file!==info.replay_file||previous.duration_sec!==info.duration_sec;
+  const free=isCameraOnly(),previous=sequenceEditor.doc.timeline,fit=previous?.replay_file!==info.replay_file||previous?.duration_sec!==info.duration_sec;
   const bound=sequenceEditor.edit(()=>{
+    sequenceEditor.doc.timeline??={time_basis:'replay',work_start_sec:0,work_end_sec:Math.min(8,info.duration_sec)};
     const t=sequenceEditor.doc.timeline;t.duration_sec=info.duration_sec;t.replay_file=info.replay_file;
     const digest=info.replay_sha256||info.sha256;if(digest)t.replay_sha256=digest;else delete t.replay_sha256;
     for(const name of ['battle_start_sec','battle_start_raw_sec','replay_origin_sec','battle_start_status','battle_start_reason']){delete t[name];if(name in info)t[name]=info[name];}
     if(t.work_end_sec>t.duration_sec){t.work_start_sec=0;t.work_end_sec=Math.min(8,t.duration_sec);}
+    if(free)return;
     const minimum=finite(state.replayKeyframeStartSeconds)?state.replayKeyframeStartSeconds:info.battle_start_status==='identified'?info.battle_start_sec:null;
     if(t.starter_keyframes_pending&&finite(minimum)&&minimum<t.duration_sec){
       const keys=Object.values(sequenceEditor.doc.tracks).flat(),first=Math.min(...keys.map(k=>k.time_sec)),last=Math.max(...keys.map(k=>k.time_sec));
@@ -1015,7 +1063,7 @@ function applyReplayInfo(info){
     }
   });
   if(!bound)return false;
-  if(fit)sequenceEditor.fit();
+  if(fit&&!free)sequenceEditor.fit();
   $("replayFilePath").value=info.replay_file;
   if(state.timeline?.replay_file===info.replay_file&&state.timeline.duration_sec===info.duration_sec){
     const src=$("sequenceEditor").querySelector('[data-source]');
@@ -1061,7 +1109,7 @@ function drawSpeedGraph(){
  const shooting=active?live.shooting_elapsed||0:clock.atTime(state.previewTime);
  const schedule=live.schedule_seconds??t.shootingDuration,offset=live.schedule_offset||0;
  const work=speed.mode==='curve'&&speed.time_range?(()=>{const r=speed.time_range;return [first,first+duration].map(v=>BlitzPreviewTime.atCamera(r.end_sec-r.start_sec,speed,(v-r.start_sec)/(r.end_sec-r.start_sec)).shootingProgress);})():null;
- BlitzPreviewTime.draw(svg,speed,active?(shooting+offset)/Math.max(.001,schedule):t.shootingProgress,{editable:true,selected:speedCurveEditor?.index()??-1,work});
+ BlitzPreviewTime.draw(svg,speed,active?(shooting+offset)/Math.max(.001,schedule):t.shootingProgress,{editable:true,selected:speedCurveEditor?.index()??-1,work,view:speedCurveEditor?.view});
  $("speedPreviewReadout").textContent=`${active?"游戏内":"离线预演"} · ${numberText(active?live.current_rate:outside?1:t.rate,3)}× · 拍摄 ${numberText(shooting,2)} / ${numberText(active?live.shooting_duration??schedule-offset:clock.seconds,2)} s · 战斗 +${numberText(active?live.replay_elapsed:isCameraOnly()?0:state.previewTime-clock.start,2)} s`;
 }
 $("replayFixedRate").addEventListener("change",()=>{stopPlayback();state.rateMode="fixed";state.speedFrames=[{progress:0,rate:Number($("replayFixedRate").value)},{progress:1,rate:Number($("replayFixedRate").value)}];sequenceEditor.changeSpeed(speedSettings());});
@@ -1182,6 +1230,7 @@ function sizeText(n) {
   return (n / 1048576).toFixed(1) + ' MB';
 }
 function showHome(on) {
+  if(!state.project)on=true;
   closeHomeMenu();
   if(state.settingsOpen)closeSettings();
   state.home = on;
@@ -1297,9 +1346,9 @@ function showHomeMenu(item,trigger,keyboard=false) {
   const menu=$('homeProjectMenu');menu.querySelector('.home-delete').hidden=!item.exists;
   menu.setAttribute('aria-label',`${item.name} 的项目操作`);menu.hidden=false;
   trigger.setAttribute('aria-expanded','true');updateHomeControls();
-  const rect=trigger.getBoundingClientRect(),gap=8;
-  menu.style.left=Math.max(gap,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-gap))+'px';
-  menu.style.top=Math.max(gap,rect.bottom+menu.offsetHeight+gap<=innerHeight?rect.bottom+4:rect.top-menu.offsetHeight-4)+'px';
+  const rect=trigger.getBoundingClientRect(),gap=8,scale=window.BlitzUIScale||1;
+  menu.style.left=Math.max(gap,Math.min(rect.right/scale-menu.offsetWidth,innerWidth/scale-menu.offsetWidth-gap))+'px';
+  menu.style.top=Math.max(gap,rect.bottom/scale+menu.offsetHeight+gap<=innerHeight/scale?rect.bottom/scale+4:rect.top/scale-menu.offsetHeight-4)+'px';
   menu.querySelector('button').focus();
 }
 function showHomeInfo(item) {
@@ -1393,9 +1442,9 @@ function renderBattleStartStatus(){
 }
 function renderGlobalKeys(){
   const h=nativeHostState,available=!!hostBridge&&!!h;
-  for(const id of ['globalCaptureKey','globalHideKey','applyGlobalKeys'])$(id).disabled=!available;
+  for(const id of ['globalCaptureKey','globalHideKey','applyGlobalKeys','globalKeysDefault'])$(id).disabled=!available;
   if(!available)return;
-  if(!globalKeysEdited){$('globalCaptureKey').value=h.captureKey||'F8';$('globalHideKey').value=h.hideKey||'F9';}
+  if(!globalKeysEdited){for(const [id,key] of [['globalCaptureKey',h.captureKey||'F8'],['globalHideKey',h.hideKey||'F9']]){$(id).dataset.binding=inputControls.globalKey(key);$(id).textContent=inputControls.label($(id).dataset.binding);}}
   $('globalKeyStatus').textContent=h.warnings?.length?h.warnings.join('；'):
     h.captureHotkeyRegistered&&h.hideHotkeyRegistered?'快捷键已生效。游戏最小化时悬浮窗会自动隐藏，恢复游戏后还原。':'快捷键尚未注册，请选择其他按键后应用。';
 }
@@ -1403,15 +1452,38 @@ function updateSettingsControls(){
   const locked=state.busy||settingsLoading||!state.serviceReady;
   $('settingsButton').disabled=state.busy;
   $('projectDirectory').disabled=locked||!applicationSettings;
+  $('uiScale').disabled=locked||!applicationSettings;
   $('settingsBrowse').disabled=locked;
   $('settingsDefault').disabled=locked||!applicationSettings;
   const manual=$('battleStartMode').value==='manual',seconds=settingsBattleStart();
   $('battleStartMode').disabled=locked||!applicationSettings;
   $('battleStartManual').hidden=!manual;$('battleStartSeconds').disabled=locked||!applicationSettings||!manual;
   const valid=!manual||$('battleStartSeconds').value.trim()!==''&&finite(seconds)&&seconds>=0&&seconds<=3600;
-  const changed=applicationSettings&&($('projectDirectory').value.trim()!==applicationSettings.project_directory||seconds!==applicationSettings.replay_keyframe_start_seconds);
+  const changed=applicationSettings&&($('projectDirectory').value.trim()!==applicationSettings.project_directory||seconds!==applicationSettings.replay_keyframe_start_seconds||Number($('uiScale').value)!==applicationSettings.ui_scale);
   $('settingsSave').disabled=locked||!applicationSettings||!$('projectDirectory').value.trim()||!valid||!changed;
   $('settingsBack').disabled=state.busy;
+  updateControlsSettings();
+}
+function globalBindingConflict(config,keys=[nativeHostState?.captureKey,nativeHostState?.hideKey]){
+  if(!config||!inputControls.schema)return '';
+  const globals=keys.filter(Boolean).map(inputControls.globalKey);
+  const a=inputControls.schema.actions.find(a=>globals.includes(config.bindings[a.id]));
+  return a?`“${a.label}”与全局快捷键 ${inputControls.label(config.bindings[a.id])} 冲突，请换一个按键。`:'';
+}
+function updateControlsSettings(){
+  const locked=state.busy||settingsLoading||!state.serviceReady||!applicationSettings||!inputControls.schema;
+  controlsEditor.lock(locked);
+  const config=controlsEditor.value,conflict=globalBindingConflict(config);
+  $('controlsSave').disabled=locked||!config||!!controlsEditor.errors.length||!!conflict||JSON.stringify(config)===JSON.stringify(applicationSettings?.input_controls);
+  if(conflict)controlsEditor.message(conflict,true);
+}
+function selectSettingsSection(section){
+  inputControls.cancelCapture();settingsSection=section;
+  for(const [name,prefix] of [['general','settingsGeneral'],['controls','settingsControls']]){
+    $(prefix+'Panel').hidden=name!==section;$(prefix+'Tab').classList.toggle('active',name===section);
+    if(name===section)$(prefix+'Tab').setAttribute('aria-current','page');else $(prefix+'Tab').removeAttribute('aria-current');
+  }
+  document.querySelector('.settings-main').scrollTop=0;
 }
 async function openSettings(){
   closeHomeMenu();
@@ -1420,14 +1492,19 @@ async function openSettings(){
   $('settingsButton').setAttribute('aria-pressed','true');$('settingsBack').textContent=state.home?'返回主页':'返回工作台';
   settingsLoading=true;settingsMessage('正在读取设置…');updateSettingsControls();
   try{
+    await inputControls.ready;
+    if(inputControls.error)throw Error(inputControls.error);
     applicationSettings=await api('/api/settings');$('projectDirectory').value=applicationSettings.project_directory;
+    inputControls.apply(applicationSettings.input_controls);controlsEditor.load(applicationSettings.input_controls);
+    $('uiScale').value=String(applicationSettings.ui_scale);
     $('battleStartMode').value=applicationSettings.replay_keyframe_start_seconds===null?'auto':'manual';
     $('battleStartSeconds').value=applicationSettings.replay_keyframe_start_seconds??keyframeGuardFor().start_sec??0;
     settingsMessage('');renderBattleStartStatus();renderGlobalKeys();
   }catch(error){settingsMessage(error.message,true);}
-  finally{settingsLoading=false;updateSettingsControls();if(state.settingsOpen)$('projectDirectory').focus();}
+  finally{settingsLoading=false;updateSettingsControls();if(state.settingsOpen)$(settingsSection==='general'?'projectDirectory':'settingsControlsTab').focus();}
 }
 function closeSettings(){
+  inputControls.cancelCapture();
   state.settingsOpen=false;document.body.classList.remove('settings-open');$('settingsView').hidden=true;
   $('settingsButton').setAttribute('aria-pressed','false');$('settingsButton').focus();
   requestAnimationFrame(()=>{restoreEditorSession();replayPreviewPane?.render();});
@@ -1435,13 +1512,34 @@ function closeSettings(){
 $('settingsButton').addEventListener('click',()=>state.settingsOpen?closeSettings():openSettings());
 $('settingsBack').addEventListener('click',closeSettings);
 $('projectDirectory').addEventListener('input',()=>{settingsMessage('');updateSettingsControls();});
-for(const id of ['battleStartMode','battleStartSeconds'])$(id).addEventListener('input',()=>{settingsMessage('');updateSettingsControls();});
-for(const id of ['globalCaptureKey','globalHideKey'])$(id).addEventListener('change',()=>{globalKeysEdited=true;});
+for(const id of ['battleStartMode','battleStartSeconds','uiScale'])$(id).addEventListener('input',()=>{settingsMessage('');updateSettingsControls();});
+for(const id of ['globalCaptureKey','globalHideKey'])$(id).addEventListener('click',()=>inputControls.capture($(id),{id,global:true},()=>$(id).dataset.binding,key=>{
+  $(id).dataset.binding=key;$(id).textContent=inputControls.label(key);globalKeysEdited=true;
+  const keys=[$('globalCaptureKey').dataset.binding,$('globalHideKey').dataset.binding];
+  $('globalKeyStatus').textContent=keys[0]===keys[1]?'两个全局操作不能使用相同按键。':globalBindingConflict(inputControls.config,keys)||'点击“应用快捷键”保存。';
+},text=>{$('globalKeyStatus').textContent=text;}));
+$('globalKeysDefault').onclick=()=>{for(const [id,key] of [['globalCaptureKey','Ctrl+Alt+F8'],['globalHideKey','Ctrl+Alt+F9']]){$(id).dataset.binding=key;$(id).textContent=inputControls.label(key);}globalKeysEdited=true;$('globalKeyStatus').textContent='点击“应用快捷键”恢复默认。';};
 $('applyGlobalKeys').addEventListener('click',()=>{
-  const keys={captureKey:$('globalCaptureKey').value,hideKey:$('globalHideKey').value};
+  const keys={captureKey:$('globalCaptureKey').dataset.binding,hideKey:$('globalHideKey').dataset.binding};
+  const error=keys.captureKey===keys.hideKey?'两个全局操作不能使用相同按键。':globalBindingConflict(inputControls.config,Object.values(keys));
+  if(error){$('globalKeyStatus').textContent=error;return;}
   globalKeysEdited=false;hostBridge?.postMessage({command:'settings',...keys});
 });
 renderGlobalKeys();
+$('settingsGeneralTab').onclick=()=>selectSettingsSection('general');
+$('settingsControlsTab').onclick=()=>selectSettingsSection('controls');
+$('controlsDefault').onclick=()=>controlsEditor.reset();
+$('controlsForm').addEventListener('submit',event=>{
+  event.preventDefault();if($('controlsSave').disabled)return;
+  inputControls.cancelCapture();const config=controlsEditor.value;
+  action(async()=>{
+    try{
+      applicationSettings=await api('/api/settings',{project_directory:applicationSettings.project_directory,input_controls:config});
+      inputControls.apply(applicationSettings.input_controls);controlsEditor.load(applicationSettings.input_controls);
+      await refreshState();controlsEditor.message('快捷键与控制已保存。');
+    }catch(error){controlsEditor.message(error.message,true);}
+  });
+});
 $('settingsDefault').addEventListener('click',()=>{$('projectDirectory').value=applicationSettings.default_project_directory;settingsMessage('点击“保存设置”应用默认位置。');updateSettingsControls();});
 $('settingsBrowse').addEventListener('click',()=>action(async()=>{
   const result=await api('/api/settings/directory',{initial:$('projectDirectory').value},{timeout:0});
@@ -1451,7 +1549,7 @@ $('settingsBrowse').addEventListener('click',()=>action(async()=>{
 $('settingsForm').addEventListener('submit',event=>{
   event.preventDefault();if($('settingsSave').disabled)return;
   action(async()=>{
-    try{applicationSettings=await api('/api/settings',{project_directory:$('projectDirectory').value,replay_keyframe_start_seconds:settingsBattleStart()});$('projectDirectory').value=applicationSettings.project_directory;await refreshState();settingsMessage('设置已保存。');renderBattleStartStatus();}
+    try{applicationSettings=await api('/api/settings',{project_directory:$('projectDirectory').value,replay_keyframe_start_seconds:settingsBattleStart(),ui_scale:Number($('uiScale').value)});$('projectDirectory').value=applicationSettings.project_directory;applyUIScale(applicationSettings.ui_scale);await refreshState();settingsMessage('设置已保存。');renderBattleStartStatus();}
     catch(error){settingsMessage(error.message,true);}
   });
 });
@@ -1461,6 +1559,8 @@ $('settingsForm').addEventListener('submit',event=>{
 }
 setInterval(()=>{restoreEditorSession();if(!state.busy)persistEditorSession().catch(()=>{});},750);
 window.BlitzStartup?.watch(()=>{
+  if(inputControls.error)return {error:inputControls.error,canEnter:false};
+  if(!inputControls.config)return {message:'正在读取快捷键设置…'};
   if(startupServiceError)return {error:startupServiceError,canEnter:state.loaded};
   if(!state.loaded)return {message:'正在读取项目…'};
   if(state.home){

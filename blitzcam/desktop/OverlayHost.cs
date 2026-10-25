@@ -113,6 +113,7 @@ namespace BlitzCamera {
     public bool Dragging;
     bool workbenchRequested;
     bool capturePending;
+    bool capturingShortcut;
     readonly List<string> warnings = new List<string>();
     readonly string layoutFile;
 
@@ -165,17 +166,39 @@ namespace BlitzCamera {
       }
     }
     public static string ValidKey(string key) {
-      if(!new[]{"F7","F8","F9","F10","F11","F12"}.Contains(key))throw new ArgumentException("快捷键需在 F7–F12 中选择。");return key;
+      if(new[]{"F7","F8","F9","F10","F11","F12"}.Contains(key))key="Ctrl+Alt+"+key;
+      if(string.IsNullOrEmpty(key))throw new ArgumentException("全局快捷键不能为空。");
+      var parts=key.Split('+');string code=parts.Last();var mods=parts.Take(parts.Length-1).ToArray();
+      if(!mods.SequenceEqual(new[]{"Ctrl","Alt","Shift"}.Where(m=>mods.Contains(m)))||(!mods.Contains("Ctrl")&&!mods.Contains("Alt")))throw new ArgumentException("全局快捷键需包含 Ctrl 或 Alt。");
+      KeyCode(code);
+      if(code=="Tab"||code=="F12"||(mods.Contains("Alt")&&code=="F4")||(mods.Contains("Ctrl")&&!mods.Contains("Alt")&&new[]{"KeyS","KeyZ","KeyY","KeyA","KeyC","KeyV","KeyX","KeyR","KeyL","KeyW","KeyT","KeyN","KeyP","KeyF"}.Contains(code)))throw new ArgumentException("此按键保留给通用操作，请换一个。");
+      return key;
     }
-    bool RegisterKey(int id,string key){return Native.RegisterHotKey(hotkeyWindow.Handle,id,0x4003,(uint)(111+int.Parse(key.Substring(1))));}
+    public static uint KeyCode(string code){
+      if(code.Length==4&&code.StartsWith("Key")&&code[3]>='A'&&code[3]<='Z')return code[3];
+      if(code.Length==6&&code.StartsWith("Digit")&&code[5]>='0'&&code[5]<='9')return code[5];
+      if(code.Length==7&&code.StartsWith("Numpad")&&code[6]>='0'&&code[6]<='9')return (uint)(96+code[6]-'0');
+      int f;if(code.StartsWith("F")&&int.TryParse(code.Substring(1),out f)&&f>=1&&f<=12)return (uint)(111+f);
+      var codes=new Dictionary<string,uint>{{"Tab",9},{"ArrowLeft",37},{"ArrowUp",38},{"ArrowRight",39},{"ArrowDown",40},{"Home",36},{"End",35},{"PageUp",33},{"PageDown",34},{"Insert",45},{"Backquote",192},{"Minus",189},{"Equal",187},{"BracketLeft",219},{"BracketRight",221},{"Backslash",220},{"Semicolon",186},{"Quote",222},{"Comma",188},{"Period",190},{"Slash",191}};
+      uint vk;if(codes.TryGetValue(code,out vk))return vk;throw new ArgumentException("不支持的快捷键。");
+    }
+    static uint KeyModifiers(string key){uint mods=0;if(key.Contains("Ctrl+"))mods|=2;if(key.Contains("Alt+"))mods|=1;if(key.Contains("Shift+"))mods|=4;return mods;}
+    public static bool MatchesKey(string chord,KeyEventArgs e){
+      if(string.IsNullOrEmpty(chord))return false;
+      try{uint mods=0;var m=Keyboard.Modifiers;if((m&ModifierKeys.Control)!=0)mods|=2;if((m&ModifierKeys.Alt)!=0)mods|=1;if((m&ModifierKeys.Shift)!=0)mods|=4;if((m&ModifierKeys.Windows)!=0)return false;
+        return mods==KeyModifiers(chord)&&(uint)KeyInterop.VirtualKeyFromKey(e.Key==Key.System?e.SystemKey:e.Key)==KeyCode(chord.Split('+').Last());
+      }catch{return false;}
+    }
+    public static string KeyLabel(string key){return key.Replace("Key","").Replace("Digit","").Replace("Numpad","小键盘 ");}
+    bool RegisterKey(int id,string key){key=ValidKey(key);return Native.RegisterHotKey(hotkeyWindow.Handle,id,0x4000|KeyModifiers(key),KeyCode(key.Split('+').Last()));}
     void UnregisterKeys(){Native.UnregisterHotKey(hotkeyWindow.Handle,1);Native.UnregisterHotKey(hotkeyWindow.Handle,2);}
     void UpdateKeyWarnings(){
       warnings.Clear();
-      if(!HideHotkeyRegistered)warnings.Add("Ctrl+Alt+"+HideKey+" 显示/隐藏快捷键被占用，请在设置中换键；仍可从托盘恢复窗口。");
-      if(!CaptureHotkeyRegistered)warnings.Add("Ctrl+Alt+"+CaptureKey+" 打关键帧快捷键被占用，请在设置中换键。");
+      if(!HideHotkeyRegistered)warnings.Add(KeyLabel(ValidKey(HideKey))+" 显示/隐藏快捷键被占用，请在设置中换键；仍可从托盘恢复窗口。");
+      if(!CaptureHotkeyRegistered)warnings.Add(KeyLabel(ValidKey(CaptureKey))+" 打关键帧快捷键被占用，请在设置中换键。");
     }
     bool RegisterKeys(string hide,string capture) {
-      ValidKey(hide);ValidKey(capture);
+      hide=ValidKey(hide);capture=ValidKey(capture);
       if(hide==capture)throw new ArgumentException("显示/隐藏与打关键帧快捷键不能相同。");
       if(Smoke||hotkeyWindow==null){HideKey=hide;CaptureKey=capture;return true;}
       string oldHide=HideKey,oldCapture=CaptureKey;
@@ -186,7 +209,7 @@ namespace BlitzCamera {
       // unavailable at startup. A failed edit never silently changes one key.
       UnregisterKeys();
       HideHotkeyRegistered=RegisterKey(1,oldHide);CaptureHotkeyRegistered=RegisterKey(2,oldCapture);UpdateKeyWarnings();
-      string error="快捷键设置未生效："+string.Join("、",new[]{hideOk?null:"Ctrl+Alt+"+hide,captureOk?null:"Ctrl+Alt+"+capture}.Where(k=>k!=null))+" 已被占用，请换键。";
+      string error="快捷键设置未生效："+string.Join("、",new[]{hideOk?null:KeyLabel(hide),captureOk?null:KeyLabel(capture)}.Where(k=>k!=null))+" 已被占用，请换键。";
       if(!warnings.Contains(error))warnings.Add(error);return false;
     }
     public void ApplySettings(Dictionary<string,object> m,string source="connection"){
@@ -197,8 +220,15 @@ namespace BlitzCamera {
       if(m.ContainsKey("opacity"))Opacity=Math.Max(45,Math.Min(95,Convert.ToInt32(m["opacity"])));
       foreach(var p in Panels.Values)p.UpdateOpacity();SaveLayout();Broadcast(Status());WriteStatus();
     }
+    public void SetShortcutCapture(bool active){
+      if(shuttingDown){capturingShortcut=false;return;}
+      if(active==capturingShortcut)return;capturingShortcut=active;
+      if(Smoke||hotkeyWindow==null)return;
+      if(active)UnregisterKeys();
+      else{RegisterKeys(HideKey,CaptureKey);Broadcast(Status());WriteStatus();}
+    }
     IntPtr Hotkey(IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled) {
-      if(msg==0x312){if(w.ToInt32()==1)ToggleOverlay();else if(w.ToInt32()==2)CaptureKeyframe();handled=true;}return IntPtr.Zero;
+      if(msg==0x312){if(!capturingShortcut){if(w.ToInt32()==1)ToggleOverlay();else if(w.ToInt32()==2)CaptureKeyframe();}handled=true;}return IntPtr.Zero;
     }
     public void Broadcast(object value){foreach(var p in Panels.Values)p.Send(value);if(Workbench!=null)Workbench.Send(value);}
     public bool SendFeedback(string target,object value){
@@ -422,6 +452,7 @@ namespace BlitzCamera {
       bool hidden=Native.GetCursorInfo(ref cursor)&&(cursor.Flags&1)==0;
       return new{active=Active,clipped=clipped,hidden=hidden};
     }
+    string exitKey="Tab",exitMouse="Mouse0";
     public FlightMouse(Window owner,WebView2CompositionControl view){
       window=owner;web=view;
       window.Deactivated+=delegate{Stop();};
@@ -430,15 +461,17 @@ namespace BlitzCamera {
       window.Closed+=delegate{Stop();};
       web.PreviewMouseMove+=delegate(object s,MouseEventArgs e){if(Active)e.Handled=true;};
       web.PreviewMouseDown+=delegate(object s,MouseButtonEventArgs e){
-        if(!Active)return;e.Handled=true;suppressMouseUp=true;if(e.ChangedButton==MouseButton.Left)Stop();
+        if(!Active)return;e.Handled=true;suppressMouseUp=true;
+        string button=e.ChangedButton==MouseButton.Left?"Mouse0":e.ChangedButton==MouseButton.Middle?"Mouse1":e.ChangedButton==MouseButton.Right?"Mouse2":e.ChangedButton==MouseButton.XButton1?"Mouse3":"Mouse4";
+        if(button==exitMouse)Stop();
       };
       web.PreviewMouseUp+=delegate(object s,MouseButtonEventArgs e){if(Active||suppressMouseUp){e.Handled=true;suppressMouseUp=false;}};
       web.PreviewMouseWheel+=delegate(object s,MouseWheelEventArgs e){if(!Active)return;e.Handled=true;Send(new{type="flight-wheel",id=request,delta=-e.Delta});};
-      web.PreviewKeyDown+=delegate(object s,KeyEventArgs e){if(Active&&(e.Key==Key.Escape||e.Key==Key.Tab)){e.Handled=true;Stop();}};
+      web.PreviewKeyDown+=delegate(object s,KeyEventArgs e){if(Active&&(e.Key==Key.Escape||Host.MatchesKey(exitKey,e))){e.Handled=true;Stop();}};
     }
     void Send(object message){try{web.CoreWebView2.PostWebMessageAsJson(Host.Json.Serialize(message));}catch{}}
-    public void Start(int id,double x,double y){
-      Stop();request=id;
+    public void Start(int id,double x,double y,string key="Tab",string mouse="Mouse0"){
+      Stop();request=id;exitKey=key;exitMouse=mouse;
       if(id<=0||!window.IsActive||!web.IsVisible||double.IsNaN(x)||double.IsInfinity(x)||double.IsNaN(y)||double.IsInfinity(y)||x<0||y<0||x>=web.ActualWidth||y>=web.ActualHeight){Send(new{type="flight-state",id=request,active=false});return;}
       if(!Native.GetCursorPos(out returnPoint)||!Native.GetClipCursor(out previousClip)){Send(new{type="flight-state",id=request,active=false});return;}
       IntPtr hwnd=new WindowInteropHelper(window).Handle;
@@ -499,6 +532,8 @@ namespace BlitzCamera {
       var frame=new Border{Background=Background};
       Web=new WebView2CompositionControl{MinWidth=64,MinHeight=64,DefaultBackgroundColor=System.Drawing.Color.FromArgb(255,23,23,23)};frame.Child=Web;Content=frame;
       flight=new FlightMouse(this,Web);
+      Deactivated+=delegate{host.SetShortcutCapture(false);};
+      Closed+=delegate{host.SetShortcutCapture(false);};
       StateChanged+=delegate{frame.Padding=WindowState==WindowState.Maximized?SystemParameters.WindowResizeBorderThickness:new Thickness(0);SendWindowState();};
       SourceInitialized+=delegate{
         HwndSource source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
@@ -519,7 +554,7 @@ namespace BlitzCamera {
         if(initialized)return;initialized=true;
         try{
           await Web.EnsureCoreWebView2Async(host.Environment);host.ConfigureWeb(Web.CoreWebView2);
-          Web.CoreWebView2.NavigationStarting+=delegate{flight.Stop();};
+          Web.CoreWebView2.NavigationStarting+=delegate{flight.Stop();host.SetShortcutCapture(false);};
           Web.CoreWebView2.ProcessFailed+=delegate(object s,CoreWebView2ProcessFailedEventArgs e){
             flight.Stop();
             File.WriteAllText(Path.Combine(host.Root,"output/desktop-process-failed.json"),Host.Json.Serialize(new{kind=e.ProcessFailedKind.ToString(),reason=e.Reason.ToString(),exitCode=e.ExitCode,description=e.ProcessDescription}));
@@ -540,6 +575,7 @@ namespace BlitzCamera {
               var command=Convert.ToString(m["command"]);
               if(command=="ready")Send(host.Status());
               else if(command=="settings")host.ApplySettings(m,"workbench");
+              else if(command=="shortcut-capture")host.SetShortcutCapture(Convert.ToBoolean(m["active"]));
               else if(command=="dirty")Dirty=Convert.ToBoolean(m["value"]);
               else if(command=="editor-flushed"){
                 int id=Convert.ToInt32(m["id"]);bool success=Convert.ToBoolean(m["success"]);
@@ -551,7 +587,7 @@ namespace BlitzCamera {
               }
               else if(command=="flight"){
                 int id=Convert.ToInt32(m["id"]);
-                if(Convert.ToString(m["action"])=="start")flight.Start(id,Convert.ToDouble(m["x"]),Convert.ToDouble(m["y"]));
+                if(Convert.ToString(m["action"])=="start")flight.Start(id,Convert.ToDouble(m["x"]),Convert.ToDouble(m["y"]),m.ContainsKey("exitKey")?Convert.ToString(m["exitKey"]):"Tab",m.ContainsKey("exitMouse")?Convert.ToString(m["exitMouse"]):"Mouse0");
                 else flight.Stop(id);
               }
               else if(command=="window"){

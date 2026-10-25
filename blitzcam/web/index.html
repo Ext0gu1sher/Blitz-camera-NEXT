@@ -20,6 +20,8 @@
   <script src="/editor-session.js" defer></script>
   <link rel="stylesheet" href="/number-field.css">
   <script src="/number-field.js" defer></script>
+  <script src="/controls.js" defer></script>
+  <script src="/control-settings.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body class="workbench-060 app-starting">
@@ -61,6 +63,7 @@
     <symbol id="i-redo" viewBox="0 0 16 16"><path d="M9.5 3.5 13 7l-3.5 3.5"/><path d="M12.5 7h-6a4 4 0 0 0 0 8H8"/></symbol>
     <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5V2.5h-8v8H5"/></symbol>
     <symbol id="i-paste" viewBox="0 0 16 16"><rect x="5" y="1.5" width="6" height="3" rx="1"/><path d="M5 3H3v11h10V3h-2M5.5 7h5M5.5 10h5"/></symbol>
+    <symbol id="i-cut" viewBox="0 0 16 16"><circle cx="4" cy="4" r="2"/><circle cx="4" cy="12" r="2"/><path d="m5.5 5.5 8 8m-8-3 8-8"/></symbol>
     <symbol id="i-snap" viewBox="0 0 16 16"><path d="M4.5 2v5.5a3.5 3.5 0 0 0 7 0V2"/><path d="M4.5 2h3M8.5 2h3M4.5 5.5h3M8.5 5.5h3"/><path d="M8 11v3.5"/></symbol>
     <symbol id="i-zoom-in" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14M7 4.8v4.4M4.8 7h4.4"/></symbol>
     <symbol id="i-zoom-out" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4 14 14M4.8 7h4.4"/></symbol>
@@ -110,17 +113,17 @@
       <label><input type="radio" name="shootingMode" value="replay" checked><span>随对局</span></label>
     </fieldset>
     <div class="tb-actions">
+      <button class="ib" id="openReplayButton" title="选择回放文件…" aria-label="选择回放文件…" disabled><svg class="ic"><use href="#i-film"/></svg><span class="sr-only" data-label>选择回放文件…</span></button>
       <button class="ib" id="playProjectReplay" title="在游戏中播放项目回放" aria-label="在游戏中播放项目回放" disabled><svg class="ic"><use href="#i-game"/></svg></button>
       <button class="ib" id="connectButton" title="连接客户端" aria-label="连接客户端" disabled><svg class="ic"><use href="#i-link"/></svg></button>
       <button class="ib" id="disconnectButton" title="断开客户端" aria-label="断开客户端" disabled><svg class="ic"><use href="#i-unlink"/></svg></button>
-      <button class="ib" id="openReplayButton" title="打开回放文件" aria-label="打开回放文件" disabled><svg class="ic"><use href="#i-film"/></svg><span class="sr-only" data-label>打开回放文件…</span></button>
       <button class="ib" id="importButton" title="打开项目…" aria-label="打开项目…" disabled><svg class="ic"><use href="#i-folder"/></svg></button>
       <button class="ib" id="exportButton" title="另存为…" aria-label="另存为…" disabled><svg class="ic"><use href="#i-save-as"/></svg></button>
       <button class="ib pri" id="saveButton" title="保存 Ctrl+S" aria-label="保存 Ctrl+S" disabled><svg class="ic"><use href="#i-save"/></svg></button>
       <button class="ib" id="openOverlay" title="悬浮小窗" aria-label="悬浮小窗"><svg class="ic"><use href="#i-pip"/></svg></button>
       <button class="ib" id="settingsButton" title="设置" aria-label="设置" aria-pressed="false"><svg class="ic"><use href="#i-settings"/></svg></button>
     </div>
-    <span class="version-label">0.9.4.1 · STEAM 11.21</span>
+    <span class="version-label">0.9.4.2 · STEAM 11.21</span>
     <div class="window-controls" id="windowControls" hidden>
       <button class="wc" id="winMin" title="最小化" aria-label="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
       <button class="wc" id="winMax" title="最大化" aria-label="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
@@ -164,18 +167,27 @@
   <main class="settings-page" id="settingsView" hidden aria-labelledby="settingsTitle">
     <aside class="settings-side">
       <h1 id="settingsTitle">设置</h1>
-      <span class="settings-nav"><svg class="ic"><use href="#i-folder"/></svg>项目与保存</span>
+      <nav class="settings-tabs" aria-label="设置分类">
+        <button class="settings-nav active" id="settingsGeneralTab" aria-current="page">常规</button>
+        <button class="settings-nav" id="settingsControlsTab">快捷键与控制</button>
+      </nav>
       <button class="button secondary" id="settingsBack">返回工作台</button>
     </aside>
     <section class="settings-main">
-      <h2>应用设置</h2>
-      <p class="settings-subtitle">管理项目保存、全局快捷键和模式二的关键帧起始时间。</p>
+      <div id="settingsGeneralPanel">
+      <h2>常规</h2>
+      <p class="settings-subtitle">管理项目保存、界面大小和模式二的关键帧起始时间。</p>
       <form id="settingsForm" class="settings-card">
         <label class="settings-label" for="projectDirectory">默认项目文件夹</label>
         <p class="settings-help" id="projectDirectoryHelp">新建项目和“另存为”默认使用此文件夹。</p>
         <div class="settings-path-row">
           <input id="projectDirectory" type="text" spellcheck="false" autocomplete="off" aria-describedby="projectDirectoryHelp" placeholder="选择文件夹，或输入完整路径">
           <button class="button secondary" type="button" id="settingsBrowse"><svg class="ic"><use href="#i-folder"/></svg>选择文件夹</button>
+        </div>
+        <div class="settings-section">
+          <label class="settings-label" for="uiScale">界面缩放</label>
+          <p class="settings-help">放大文字、按钮和编辑控件。保存后立即生效，下次启动继续使用。</p>
+          <select id="uiScale" aria-label="界面缩放比例"><option value="100">100%（默认）</option><option value="110">110%</option><option value="125">125%</option><option value="150">150%</option><option value="175">175%</option><option value="200">200%</option></select>
         </div>
         <div class="settings-section">
           <label class="settings-label" for="battleStartMode">模式二 · 赛前片段</label>
@@ -192,16 +204,35 @@
           <button class="button settings-primary" type="submit" id="settingsSave" disabled>保存设置</button>
         </div>
       </form>
+      </div>
+      <div id="settingsControlsPanel" hidden>
+        <h2>快捷键与控制</h2>
+        <p class="settings-subtitle">点击按键后直接录入，保存后立即生效。不同场景可复用同一按键。</p>
+        <form id="controlsForm" class="settings-card controls-card">
+          <p class="settings-help fixed-keys">空格：播放 / 暂停 · Esc：退出 / 取消<br>保存、撤销、复制粘贴等通用组合键保持固定。鼠标转向与滚轮缩放保持不变。</p>
+          <fieldset id="controlsFields" disabled>
+            <div id="bindingGroups"></div>
+            <section class="binding-group"><h3>控制手感</h3><p class="settings-help">灵敏度与速度仅影响实机预览。时间跳转长按加速，到达设定倍率后保持，到轨道两端停止。</p><div id="controlTuning"></div></section>
+          </fieldset>
+          <div class="settings-save-row controls-save-row">
+            <button class="button secondary" type="button" id="controlsDefault" disabled>恢复本页默认</button>
+            <span class="settings-result" id="controlsResult" role="status" aria-live="polite"></span>
+            <button class="button settings-primary" type="submit" id="controlsSave" disabled>保存快捷键与控制</button>
+          </div>
+        </form>
       <section class="settings-card" aria-labelledby="hotkeyTitle">
         <h3 id="hotkeyTitle">全局快捷键</h3>
         <p class="settings-help">游戏中也可使用。记录当前游戏镜头的全部七项属性；模式一使用编辑器播放头时刻，模式二使用游戏当前暂停时刻。同一时刻已有点时会提示，不会直接替换。</p>
         <div class="settings-inline-row">
-          <label>记录关键帧 Ctrl+Alt+<select id="globalCaptureKey"><option>F7</option><option selected>F8</option><option>F9</option><option>F10</option><option>F11</option><option>F12</option></select></label>
-          <label>悬浮窗显隐 Ctrl+Alt+<select id="globalHideKey"><option>F7</option><option>F8</option><option selected>F9</option><option>F10</option><option>F11</option><option>F12</option></select></label>
+          <label>记录游戏关键帧 <button class="binding-button" id="globalCaptureKey" type="button">Ctrl+Alt+F8</button></label>
+          <label>悬浮窗显隐 <button class="binding-button" id="globalHideKey" type="button">Ctrl+Alt+F9</button></label>
+          <button class="button secondary" id="globalKeysDefault" type="button">恢复默认</button>
           <button class="button secondary" id="applyGlobalKeys" type="button">应用快捷键</button>
         </div>
         <p class="settings-help" id="globalKeyStatus" role="status">全局快捷键需要桌面版工作台。</p>
+        <p class="settings-help">包含 Ctrl 或 Alt 的组合键，单独应用并保存。若被其他程序占用，将保留原来的按键。</p>
       </section>
+      </div>
     </section>
   </main>
 
@@ -280,13 +311,22 @@
             <button class="ib" data-speed-action="delete" title="删除选中速度点 Delete；首尾点保留" aria-label="删除速度点"><svg class="ic"><use href="#i-close"/></svg></button>
           </div>
           <svg id="speedGraph" tabindex="0" role="group" aria-label="速度曲线编辑器；Ctrl 加点，拖动速度点和手柄" aria-describedby="speedEditHint"></svg>
+          <div class="speed-view-controls">
+            <button class="ib" data-speed-view="out" title="缩小速度曲线" aria-label="缩小速度曲线"><svg class="ic"><use href="#i-zoom-out"/></svg></button>
+            <input id="speedZoom" type="range" min="0" max="6" step="0.1" value="0" aria-label="速度曲线缩放">
+            <button class="ib" data-speed-view="in" title="放大速度曲线" aria-label="放大速度曲线"><svg class="ic"><use href="#i-zoom-in"/></svg></button>
+            <output id="speedZoomValue">1×</output>
+            <button class="ib" data-speed-view="fit" title="显示完整速度曲线" aria-label="显示完整速度曲线"><svg class="ic"><use href="#i-fit"/></svg></button>
+            <span id="speedViewRange">0–100%</span>
+          </div>
+          <div id="speedScroll" tabindex="0" role="region" aria-label="速度曲线横向滚动"><div></div></div>
           <div class="speed-point-fields">
             <span data-speed-selection>选择速度点</span>
             <label>进度 <input data-speed-field="progress" type="number" min="0" max="100" step="0.1" aria-label="速度点拍摄进度">%</label>
             <label>倍率 <input data-speed-field="rate" type="number" min="0.0625" max="1" step="0.01" aria-label="速度点倍率">×</label>
             <label>分段 <select data-speed-field="segment" aria-label="速度点分段过渡"><option value="default">跟随过渡</option><option value="smooth">平滑</option><option value="linear">线性</option><option value="custom">贝塞尔</option></select></label>
           </div>
-          <p class="speed-edit-hint" id="speedEditHint">Ctrl+左键 / 双击加点 · 拖动点或青色手柄 · Shift 锁定方向 · Alt 微调 · Ctrl+C / Ctrl+V 复制粘贴</p>
+          <p class="speed-edit-hint" id="speedEditHint">Alt+滚轮缩放 · 滚轮或滚动条平移 · Ctrl+左键 / 双击加点 · Shift 锁定方向 · Alt 微调 · Ctrl+X / C / V 剪切、复制、粘贴</p>
           <div class="speed-readout" id="speedPreviewReadout">—</div>
           <div id="speedCurveEditor" hidden>
             <div class="button-row"><label>倍速过渡 <select id="speedInterpolation"><option value="smooth">平滑过渡</option><option value="linear">线性过渡</option></select></label><button class="button secondary" id="speedPreset">正常 → 慢放 → 正常</button><button class="button secondary" id="addSpeedFrame">＋ 速度关键帧</button></div>
@@ -345,12 +385,11 @@
               <button class="view-button" id="previewObserver" aria-pressed="true">路径</button>
               <button class="view-button" id="previewCamera" aria-pressed="false" title="实机镜头画面 16:9" aria-label="实机镜头画面 16:9" disabled>实机</button>
             </div>
-            <button class="ib" id="previewFly" title="自由飞行 · WASD 移动，Q/E 升降，1–9 调速，鼠标转向，滚轮缩放，左键退出" aria-label="自由飞行" aria-pressed="false" hidden disabled><svg class="ic"><use href="#i-fly"/></svg></button>
+            <button class="ib" id="previewFly" title="自由飞行 · WASD 移动，Q/E 升降，Z/C 逆/顺时针横滚，1–9 调速，空格播放/暂停，←/→ 短按逐帧、长按加速，X 回到主角后方，鼠标转向，滚轮缩放，左键退出" aria-label="自由飞行" aria-pressed="false" hidden disabled><svg class="ic"><use href="#i-fly"/></svg></button>
             <span class="override-pill" id="previewOverride" hidden>已调整<button class="ib" id="previewOverrideReset" title="恢复镜头轨迹姿态" aria-label="恢复镜头轨迹姿态"><svg class="ic"><use href="#i-reset"/></svg></button></span>
             <button class="ib" id="previewFit" title="适应路径" aria-label="适应路径"><svg class="ic"><use href="#i-fit"/></svg></button>
             <button class="ib" id="previewRecord" disabled title="将当前镜头的七项属性记录到播放头" aria-label="记录预览镜头"><svg class="ic"><use href="#i-record"/></svg></button>
-            <button class="ib" id="loadPreviewReplay" title="载入回放预览" aria-label="载入回放预览"><svg class="ic"><use href="#i-folder"/></svg></button>
-            <button class="ib" id="retryPreview" title="重新载入" aria-label="重新载入"><svg class="ic"><use href="#i-refresh"/></svg></button>
+            <button class="ib" id="retryPreview" title="重新加载预览" aria-label="重新加载预览" disabled><svg class="ic"><use href="#i-refresh"/></svg></button>
             <span id="previewFile">未选择回放</span>
             <details class="preview-alignment"><summary title="预览时间微调（已自动对齐回放时钟）" aria-label="预览时间微调"><svg class="ic"><use href="#i-clock"/></svg></summary><label>微调 <input type="number" id="previewOffset" step="0.001" data-scrub-step="0.01" min="-600" max="600" value="0"> s</label></details>
           </div>
@@ -358,7 +397,7 @@
         <div class="canvas-wrap" id="canvasWrap">
           <canvas id="pathCanvas" aria-label="网格上的离线摄像机轨迹预览；可拖动三维视图，滚轮缩放"></canvas>
           <div class="canvas-empty" id="canvasEmpty"><svg class="ic"><use href="#i-path"/></svg><p>记录属性关键帧，或导入轨迹。</p></div>
-          <div id="replayScene" hidden><div id="previewEmpty" role="button" tabindex="0" title="载入回放预览"><svg class="ic"><use href="#i-folder"/></svg><span data-label>载入回放</span><div class="pe-progress" data-progress hidden><i></i></div><span class="pe-msg" data-msg></span></div><div class="preview-scene-hud"><span id="previewMap"></span><span id="previewSceneTime"></span></div><div class="preview-flight-hud" id="previewFlightHud" hidden><i class="flight-reticle"></i><span>WASD 移动 · Q/E 升降 · 1–9 调速 · 滚轮缩放</span><span><b id="previewFlightSpeed">4 档</b> · 左键 / Esc 退出</span></div></div>
+          <div id="replayScene" hidden><div id="previewEmpty" role="button" tabindex="-1" aria-disabled="true" title="选择回放文件"><svg class="ic"><use href="#i-folder"/></svg><span data-label>载入回放</span><div class="pe-progress" data-progress hidden><i></i></div><span class="pe-msg" data-msg></span></div><div class="preview-scene-hud"><span id="previewMap"></span><span id="previewSceneTime"></span></div><div class="preview-flight-hud" id="previewFlightHud" hidden><i class="flight-reticle"></i><span data-flight-hint></span><span data-flight-hint></span><span data-flight-hint></span><b id="previewFlightSpeed">4 档</b></div></div>
           <span class="draft-note" id="draftPreviewNote" hidden>草稿未保存 · 预演当前草稿</span>
         </div>
         <div class="transport">

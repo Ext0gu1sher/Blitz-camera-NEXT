@@ -84,17 +84,25 @@
     return windowFrame(start,end,s,time,elapsed);
   }
   function draw(svg,s,p,options={}){
+    s=s||paused;
     svg.replaceChildren();
-    const make=(tag,attrs,text)=>{const el=document.createElementNS("http://www.w3.org/2000/svg",tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;svg.append(el);return el;};
-    const rect=svg.getBoundingClientRect(),width=Math.max(160,rect.width||300),height=Math.max(90,rect.height||92);svg.setAttribute("viewBox",`0 0 ${width} ${height}`);svg.setAttribute('preserveAspectRatio','none');
+    let layer=svg;
+    const make=(tag,attrs,text)=>{const el=document.createElementNS("http://www.w3.org/2000/svg",tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;layer.append(el);return el;};
+    const rect=svg.getBoundingClientRect(),scale=globalThis.BlitzUIScale||1,width=Math.max(160,rect.width/scale||300),height=Math.max(90,rect.height/scale||92);svg.setAttribute("viewBox",`0 0 ${width} ${height}`);svg.setAttribute('preserveAspectRatio','none');
     if(!valid(s)){make("text",{x:12,y:45,fill:"#ffb2a5","font-size":11},"请修正速度关键帧后预览");return;}
-    const left=options.editable?42:32,right=width-(options.editable?18:10),top=options.editable?20:8,bottom=height-(options.editable?28:24),x=p=>left+clamp(p)*(right-left),y=r=>bottom-r*(bottom-top);
+    const start=options.view?.start||0,span=1/(options.view?.zoom||1),end=start+span;
+    const left=options.editable?42:32,right=width-(options.editable?18:10),top=options.editable?20:8,bottom=height-(options.editable?28:24),x=p=>left+(p-start)/span*(right-left),y=r=>bottom-r*(bottom-top);
     svg.speedLayout={left,right,top,bottom,width,height};
-    if(options.work)for(const [a,b]of [[0,options.work[0]],[options.work[1],1]])if(b>a)make('rect',{x:x(a),y:top,width:x(b)-x(a),height:bottom-top,fill:'#ffffff','fill-opacity':.025,'pointer-events':'none'});
+    if(options.work)for(const [a,b]of [[0,options.work[0]],[options.work[1],1]]){const lo=Math.max(a,start),hi=Math.min(b,end);if(hi>lo)make('rect',{x:x(lo),y:top,width:x(hi)-x(lo),height:bottom-top,fill:'#ffffff','fill-opacity':.025,'pointer-events':'none'});}
     for(const r of [0,.25,.5,.75,1]){make("line",{x1:left,y1:y(r),x2:right,y2:y(r),stroke:"#52666b","stroke-opacity":.3});make("text",{x:left-7,y:y(r)+3,fill:"#8b9b9e","text-anchor":"end","font-size":10},r+"×");}
-    for(const p of width>400?[0,.25,.5,.75,1]:[0,.5,1]){make('line',{x1:x(p),y1:top,x2:x(p),y2:bottom,stroke:'#52666b','stroke-opacity':.15});make("text",{x:x(p),y:height-9,fill:"#8b9b9e","text-anchor":"middle","font-size":10},Math.round(p*100)+"%");}
-    if(options.work)options.work.forEach((v,i)=>{if(v>0&&v<1){make('line',{x1:x(v),y1:top,x2:x(v),y2:bottom,stroke:'#e0c886','stroke-opacity':.55,'stroke-dasharray':'3 4'});make('text',{x:x(v)+4,y:top-6,fill:'#e0c886','font-size':9},i?'出':'入');}});
-    make("polyline",{class:'speed-curve-line',points:Array.from({length:201},(_,i)=>x(i/200)+","+y(rateAt(s,i/200))).join(" "),fill:"none",stroke:"#cfe98b","stroke-width":2,'pointer-events':'none'});
+    const divisions=width>400?4:2;
+    for(let i=0;i<=divisions;i++){const p=start+span*i/divisions;make('line',{x1:x(p),y1:top,x2:x(p),y2:bottom,stroke:'#52666b','stroke-opacity':.15});make("text",{x:x(p),y:height-9,fill:"#8b9b9e","text-anchor":"middle","font-size":10},Number((p*100).toFixed(span<.1?2:1))+"%");}
+    if(options.work)options.work.forEach((v,i)=>{if(v>start&&v<end){make('line',{x1:x(v),y1:top,x2:x(v),y2:bottom,stroke:'#e0c886','stroke-opacity':.55,'stroke-dasharray':'3 4'});make('text',{x:x(v)+4,y:top-6,fill:'#e0c886','font-size':9},i?'出':'入');}});
+    const clipId=(svg.id||'speed')+'-plot-clip',defs=make('defs',{}),clip=document.createElementNS(svg.namespaceURI,'clipPath');clip.id=clipId;defs.append(clip);
+    const clipRect=document.createElementNS(svg.namespaceURI,'rect');for(const[k,v]of Object.entries({x:left-10,y:top-10,width:right-left+20,height:bottom-top+20}))clipRect.setAttribute(k,v);clip.append(clipRect);
+    layer=make('g',{'clip-path':`url(#${clipId})`});
+    const curvePoints=[...Array.from({length:301},(_,i)=>start+span*i/300),...(s.keyframes||[]).map(k=>k.progress).filter(p=>p>=start&&p<=end)].sort((a,b)=>a-b);
+    make("polyline",{class:'speed-curve-line',points:curvePoints.map(p=>x(p)+","+y(rateAt(s,p))).join(" "),fill:"none",stroke:"#cfe98b","stroke-width":2,'pointer-events':'none'});
     if(options.editable&&s.mode==='curve'&&options.selected>=0){
       for(const i of [options.selected-1,options.selected]){const a=s.keyframes[i],b=s.keyframes[i+1];if(!a||!b||Math.abs(b.rate-a.rate)<1e-8)continue;const e=segmentEase(s,i);
         for(let h=0;h<2;h++){const k=h?b:a,cx=x(a.progress+(b.progress-a.progress)*e[h*2]),cy=y(a.rate+(b.rate-a.rate)*e[h*2+1]);make('line',{x1:x(k.progress),y1:y(k.rate),x2:cx,y2:cy,stroke:'#88cfd0','stroke-opacity':.7});const g=make('g',{'data-speed-segment':i,'data-speed-handle':h,class:'speed-handle',role:'button','aria-label':`第 ${i+1} 段${h?'入':'出'}手柄`});for(const attrs of [{r:10,fill:'transparent'},{r:4,fill:'#182323',stroke:'#88cfd0','stroke-width':1.5}]){const c=document.createElementNS(svg.namespaceURI,'circle');for(const [k,v]of Object.entries({cx,cy,...attrs}))c.setAttribute(k,v);g.append(c);}}

@@ -13,17 +13,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    with tempfile.TemporaryDirectory(dir=ROOT/'output') as folder, patch('blitzcam.server.OUTPUT',Path(folder)):
+    with tempfile.TemporaryDirectory(dir=ROOT/'output') as folder, patch('blitzcam.server.OUTPUT',Path(folder)), \
+         patch('blitzcam.settings.documents_directory',return_value=Path(folder)/'Documents'):
         root = Path(folder).resolve()
         app = Workstation(root/'project.json');app.stop.set();app.poller.join()
         alpha = app.new_project_file('旧项目')
         forgotten = app.new_project_file('仅移出列表')
         beta = app.new_project_file('当前项目')
-        missing = root/'projects'/'已丢失.json';record_recent(missing)
+        projects = root/'Documents/Blitz-Camera-Project'
+        missing = projects/'已丢失.json';record_recent(missing)
         replay = root/'keep.wotbreplay';replay.write_bytes(b'keep replay')
         trash = root/'fake-recycle-bin';trash.mkdir()
         def recycle(path):
-            assert path.parent == (root/'projects').resolve()
+            assert path.parent == projects
             path.rename(trash/path.name)
             return True
         server = ThreadingHTTPServer(('127.0.0.1',0),make_handler(app));server.daemon_threads=True
