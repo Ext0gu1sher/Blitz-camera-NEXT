@@ -22,6 +22,7 @@ let beatEditOriginal=null;
 let toastTimeout, sequenceEditor, draftTimer, speedCurveEditor, finishEaseDrag;
 let replayPreviewPane=null;
 let autoSaveTimer=null,autoSavePromise=null,editorSavePromise=null,pendingEditorRestore=null,pendingPreviewRestore=null,lastEditorSignature='';
+let lastTimelineView=null;
 let lastEditorError='';
 let applicationSettings=null,settingsLoading=false;
 const inputControls=window.BlitzControls;
@@ -34,9 +35,12 @@ function applyUIScale(percent=100){
   requestAnimationFrame(()=>{resizeCanvas();drawCanvas();sequenceEditor?.render();speedCurveEditor?.refresh();replayPreviewPane?.render();});
 }
 let nativeHostState=null;
+let folderOpenRequest=0;
+const folderOpenRequests=new Map();
 let globalKeysEdited=false;
 let startupServiceError='',startupSamples={ready:false,error:''};
 let homeItems=[],homeLoading=false,homeError='',homeRequest=0,homeOpening=false,homeMenuItem=null,homeMenuTrigger=null;
+let homePointerActive=false,homePendingRefresh=null,homeRefreshTimer=null;
 function setIcon(button,name){const u=button?.querySelector("use");if(u)u.setAttribute("href","#"+name);}
 function syncReplayPreview(){
   replayPreviewPane?.update({mode:state.shootingMode,time:state.previewTime,tracks:state.tracks,
@@ -721,6 +725,7 @@ function updateButtons() {
 }
 
 function updateTelemetry(data) {
+  window.BlitzDeployment.edition(data.edition||'next');
   applyUIScale(data.ui_scale??100);
   inputControls.apply(data.input_controls);
   const previousPlayback=state.playback;
@@ -826,7 +831,7 @@ function loadProject(data) {
     stopPlayback();clearTimeout(autoSaveTimer);clearTimeout(draftTimer);state.previewSequence++;
     state.projectPath=null;state.project=null;state.projectHash='null';state.pendingProject=null;
     state.controls=[];state.savedControls=[];state.tracks=null;state.timeline=null;state.samples=[];state.multicam=null;state.cameraHistory.clear();cameraSamplesCache.clear();ghostCache.clear();state.cameraUndo.length=state.cameraRedo.length=0;renderMulticam();
-    state.loaded=true;state.previewTime=0;pendingEditorRestore=null;pendingPreviewRestore=null;
+    state.loaded=true;state.previewTime=0;pendingEditorRestore=null;pendingPreviewRestore=null;lastTimelineView=null;
     sequenceEditor.doc=null;sequenceEditor.selected.clear();replayPreviewPane?.clear();
     $('projectName').textContent='未打开项目';$('externalChange').hidden=true;
     startupSamples={ready:true,error:''};setDirty(false);showHome(true);return;
@@ -838,6 +843,7 @@ function loadProject(data) {
     state.appliedLaunchId=data.replay_launch?.state==='launched'?data.replay_launch.id:null;
     const saved=BlitzEditorSession.newest(data.editor_state,BlitzEditorSession.readLocal(localStorage,state.projectPath));
     pendingEditorRestore=saved||null;pendingPreviewRestore=saved?.preview||null;lastEditorSignature='';
+    lastTimelineView=saved?.timeline||null;
     state.previewTime=Number.isFinite(saved?.timeline?.playhead)?Math.max(0,saved.timeline.playhead):0;
   }
   state.project = data.project || null;
@@ -896,6 +902,14 @@ async function refreshState(forceProject = false) {
   startupServiceError='';
   showServiceError("");
   updateTelemetry(data);
+  if(data.desktop_project_request&&!state.busy&&!state.desktopProjectOpening&&!editorInteracting()&&!document.querySelector('dialog[open]')&&$('draftGuard').hidden){
+    const request=data.desktop_project_request;
+    state.desktopProjectOpening=true;
+    Promise.resolve().then(async()=>{
+      await api('/api/desktop/project/ack',{id:request.id});
+      await guardDirty(()=>{if(state.settingsOpen)closeSettings();return openProjectFlow(request.path);});
+    }).catch(error=>notify(error.message,true)).finally(()=>{state.desktopProjectOpening=false;});
+  }
   // A poll may see our pending save on disk before its acknowledgement arrives.
   // Let that acknowledgement establish the saved snapshot and revision first.
   if(state.loaded&&autoSavePromise&&!forceProject)return;
@@ -992,9 +1006,13 @@ async function autoSaveDraft(){
   return autoSavePromise;
 }
 function captureEditorSession(){
-  if(!state.loaded||!state.projectPath||!sequenceEditor?.doc)return null;
+  if(!state.loaded||!state.projectPath||!sequenceEditor?.doc||pendingEditorRestore)return null;
+  // Hidden scroll containers report zero offsets. Keep the last visible view
+  // for this project, including when the desktop closes from Home or Settings.
+  if(sequenceEditor.scroll.clientWidth>0)lastTimelineView=BlitzEditorSession.captureTimeline(sequenceEditor,state.previewTime);
+  if(!lastTimelineView)return null;
   const preview=state.shootingMode==='replay'?(BlitzEditorSession.capturePreview(replayPreviewPane)||pendingPreviewRestore):null;
-  return {schema_version:1,timeline:BlitzEditorSession.captureTimeline(sequenceEditor,state.previewTime),
+  return {schema_version:1,timeline:{...lastTimelineView,playhead:state.previewTime},
     path_view:{view:state.view,yaw:state.yaw,elevation:state.elevation,zoom:state.zoom,pan:[...state.pan]},
     preview,inspector:Object.keys(TAB_PANES).find(n=>$('tab'+n).classList.contains('active'))||'Camera',workspace_tab:state.workspaceTab,splits:{v:splitV,h:splitH}};
 }
@@ -1083,6 +1101,7 @@ function updateTimeline() {
 function stopPlayback() {
   state.previewPlaySequence++;
   state.playing = false;
+  replayPreviewPane?.resetTelemetry();
   if (state.animationRequest) cancelAnimationFrame(state.animationRequest);
   state.animationRequest = 0;
   setIcon($("playButton"), "i-play"); $("playButton").setAttribute("aria-label", "播放离线预演");
@@ -1110,6 +1129,7 @@ async function play() {
   if (!(clock.seconds>0)) return;
   if (state.previewTime >= clock.end || state.previewTime<clock.start) state.previewTime = clock.start;
   state.playing = true; state.playbackStart = state.previewTime; state.playbackAnchor = performance.now();
+  replayPreviewPane?.resetTelemetry();
   setIcon($("playButton"), "i-pause"); $("playButton").setAttribute("aria-label", "暂停离线预演");
   state.animationRequest = requestAnimationFrame(animate);
 }
@@ -1391,7 +1411,7 @@ document.addEventListener("keydown", event => {
   if(window.BlitzStartup?.active)return;
   if(state.settingsOpen){
     if(event.key==='Escape'&&!state.busy){event.preventDefault();closeSettings();}
-    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();const id=settingsSection==='controls'?'controls':'settings';if(!$(id+'Save').disabled)$(id+'Form').requestSubmit();}
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();if(settingsSection==='updates')return;const id=settingsSection==='controls'?'controls':'settings';if(!$(id+'Save').disabled)$(id+'Form').requestSubmit();}
     return;
   }
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){
@@ -1426,7 +1446,7 @@ document.addEventListener("keydown", event => {
       else{t.work_end_sec=h;if(t.work_end_sec<=t.work_start_sec)t.work_start_sec=Math.max(0,t.work_end_sec-0.001);}
     });return;
   }
-  if (event.code === "Space"&&!event.target.closest('button')) { event.preventDefault(); if(!event.repeat)play(); }
+  if (event.code === "Space"&&(!event.target.closest('button')||event.target.closest('#previewObserver,#previewCamera'))) { event.preventDefault(); if(!event.repeat)play(); }
   if (inputControls.matches('seekBack',event)||inputControls.matches('seekForward',event)) { event.preventDefault(); seek(state.previewTime + (inputControls.matches('seekForward',event) ? 1 : -1) / state.previewRate); }
 });
 window.addEventListener("beforeunload", event => {persistEditorSession(true,true);if(state.dirty){event.preventDefault();event.returnValue="";} });
@@ -1563,12 +1583,21 @@ sequenceEditor=new BlitzTimeline.Editor($("sequenceEditor"),{
   change:applyTimelineChange, seek:time=>seek(time), error:message=>notify(message,true),
   beatSettings:()=>state.beatGrid,onBeatRender:()=>syncBeatControls(),
   onWorkRangeDragStart:()=>stopPlayback(),
-  clipboardScope:target=>!!target.closest('#paneSpeed,#paneCurve'),
-  clipboardBusy:()=>!!(speedCurveEditor?.drag||state.settingsOpen||window.BlitzStartup?.active),
+  clipboardScope:target=>!target.closest('#paneMulticam,#multicamMenu,#multicamStrip,#multicamNewMenu')&&
+    (target===document.body||target===document.documentElement||!!target.closest('#wb,#titlebar,.statusbar')),
+  clipboardCutScope:target=>!!target.closest('#paneSpeed,#paneCurve'),
+  clipboardBusy:()=>!!(speedCurveEditor?.drag||state.home||state.settingsOpen||window.BlitzStartup?.active||
+    document.querySelector('dialog[open]')||!$('draftGuard').hidden),
   keyframeGuard:keyframeGuardFor,
   inspector:$("keyInspector"), onSelection:()=>showTab([...sequenceEditor.selected].some(id=>sequenceEditor.locate(id)?.row.name==='rate')?'Speed':'Curve'), onInspect:()=>{refreshEaseUI();speedCurveEditor?.refresh();},
   currentTime:()=>state.sample?.replay?.paused?state.sample.replay.time:null,
   evaluate:async time=>(await api('/api/evaluate',{...editPayload(),time_sec:time})).values,
+});
+// A mouse click on an add/record button must not leave Space poised to repeat
+// that action. Keyboard activation keeps focus and its normal button behavior.
+document.addEventListener('click',event=>{
+  const button=event.target.closest?.('#captureButton,#addKeyframeButton,#previewRecord,#sequenceEditor [data-add],[data-speed-action="add"]');
+  if(event.detail>0&&button&&document.activeElement===button)sequenceEditor.scroll.focus({preventScroll:true});
 });
 speedCurveEditor=new BlitzSpeedEditor($("paneSpeed"),sequenceEditor,{
   pause:stopPlayback,draw:drawSpeedGraph,seek,locked:()=>state.busy||state.playback.active||!state.serviceReady,error:message=>notify(message,true),
@@ -1644,7 +1673,7 @@ function changeBeatSettings(patch){
   return true;
 }
 for(const [id,key] of [['beatBpm','bpm'],['beatOffset','offset_sec']])BlitzNumbers.configure($(id),{
-  get:()=>state.beatGrid[key],set:value=>changeBeatSettings({[key]:value}),
+  get:()=>state.beatGrid[key],set:value=>changeBeatSettings({[key]:value}),...(key==='bpm'?{decimals:0}:{}),
 });
 $('paneBeat').addEventListener('number-start',()=>{stopPlayback();beatEditOriginal=copy(state.beatGrid);});
 $('paneBeat').addEventListener('number-end',event=>{const before=beatEditOriginal;beatEditOriginal=null;if(before){if(event.detail.cancelled){state.beatGrid=before;sequenceEditor.render();}else pushCameraHistory('卡点设置',{beat_grid:before},{beat_grid:copy(state.beatGrid)});}syncBeatControls();if(state.dirty)queueAutoSave();});
@@ -1652,21 +1681,105 @@ $('beatEnabled').addEventListener('change',e=>changeBeatSettings({enabled:e.targ
 $('beatDivision').addEventListener('change',e=>changeBeatSettings({division:Number(e.target.value)}));
 document.querySelectorAll('[data-beat-origin]').forEach(button=>button.addEventListener('click',()=>changeBeatSettings({origin:button.dataset.beatOrigin,...(button.dataset.beatOrigin==='playhead'?{anchor_sec:state.previewTime}:{})})));
 $("readReplayFile").onclick=async()=>{let info;await action(async()=>{info=await api('/api/replay/timeline',{path:$("replayFilePath").value.trim()});});if(info)applyReplayInfo(info);};
-async function selectProjectReplay(){
+let replayDropRequest=0;
+function droppedReplayPath(file){
+  const bridge=window.chrome?.webview;
+  if(!bridge?.postMessageWithAdditionalObjects)throw new Error('请在桌面工作台中拖入回放，或点击“载入回放”选择文件。');
+  return new Promise((resolve,reject)=>{
+    const id=++replayDropRequest;
+    const finish=(error,path)=>{clearTimeout(timer);bridge.removeEventListener('message',receive);error?reject(new Error(error)):resolve(path);};
+    const receive=event=>{const data=event.data;if(data?.type==='replay-drop-path'&&data.id===id)finish(data.error||(!data.path?'未能读取回放文件路径。':''),data.path);};
+    const timer=setTimeout(()=>finish('未能读取拖入文件，请重启桌面工作台后重试，或点击选择回放。'),5000);
+    bridge.addEventListener('message',receive);
+    try{bridge.postMessageWithAdditionalObjects({command:'replay-drop-path',id},[file]);}
+    catch(error){finish(error.message||'无法读取拖入的文件。');}
+  });
+}
+async function readReplaySelection(file){
+  if(!file)return api('/api/replay/select',{}, {timeout:0});
+  const path=typeof file==='string'?file:await droppedReplayPath(file);
+  return {info:await api('/api/replay/timeline',{path})};
+}
+async function selectProjectReplay(file=null){
   if($("openReplayButton").disabled)return;
   const projectPath=state.projectPath;let info;
   state.selectingReplay=true;
   try{
     await action(async()=>{
       stopPlayback();
-      const result=await api('/api/replay/select',{}, {timeout:0});
+      const result=await readReplaySelection(file);
       if(!result.cancelled)info=result.info;
     });
   }finally{state.selectingReplay=false;updateButtons();}
   if(!info||state.projectPath!==projectPath)return;
-  if(applyReplayInfo(info))notify(`已选择回放：${info.name}`);
+  if(applyReplayInfo(info))notify(`已关联回放：${info.name}`);
 }
-$("openReplayButton").onclick=selectProjectReplay;
+$("openReplayButton").onclick=()=>selectProjectReplay();
+async function createProjectFromReplay(file=null){
+  await switchHomeProject(async()=>{
+    let info,createdPath;
+    state.selectingReplay=true;
+    try{
+      await action(async()=>{
+        stopPlayback();
+        const result=await readReplaySelection(file);
+        if(result.cancelled)return;
+        info=result.info;
+        // Validate the replay before creating a project; invalid drops leave the current project intact.
+        const name=$('homeNewName').value.trim()||info.name.replace(/\.wotbreplay$/i,'');
+        createdPath=(await api('/api/projects/new',{name})).path;
+        await refreshState(true);
+      });
+    }finally{state.selectingReplay=false;updateButtons();}
+    if(!info||!createdPath||state.projectPath!==createdPath)return;
+    $('homeNewRow').hidden=true;$('homeNewName').value='';showHome(false);
+    if(applyReplayInfo(info))await action(async()=>{
+      await saveProject();notify(`已新建项目并关联回放：${info.name}`);
+    });
+  });
+}
+$('homeReplayDrop').onclick=()=>createProjectFromReplay();
+const replayDropOverlay=document.createElement('div');
+replayDropOverlay.id='replayDropOverlay';replayDropOverlay.className='replay-drop-overlay';replayDropOverlay.hidden=true;
+replayDropOverlay.setAttribute('role','status');replayDropOverlay.setAttribute('aria-live','polite');
+replayDropOverlay.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-film"/></svg><strong></strong><span></span>';
+document.body.append(replayDropOverlay);
+let replayDragDepth=0;
+function hasReplayDropFiles(event){return Array.from(event.dataTransfer?.types||[]).includes('Files');}
+function replayDropBlocked(){
+  if(state.busy||homeOpening||state.selectingReplay||!state.serviceReady||!state.loaded||window.BlitzStartup?.active)return '请等待当前操作完成后再拖入回放';
+  if(state.playback.active||['choosing','launching'].includes(state.replayLaunch?.state)||state.connection.state==='connecting')return '请先停止运镜或等待连接完成';
+  if(state.settingsOpen||document.querySelector('dialog[open]')||!$('draftGuard').hidden)return '请先关闭当前对话框或返回项目页面';
+  if(!state.home&&!currentCamera())return '请先新建一个机位，再关联回放';
+  return '';
+}
+function showReplayDrop(event){
+  const blocked=replayDropBlocked();
+  if(event?.dataTransfer)event.dataTransfer.dropEffect=blocked?'none':'copy';
+  replayDropOverlay.classList.toggle('blocked',!!blocked);
+  replayDropOverlay.querySelector('strong').textContent=blocked||(state.home?'松开以新建项目并关联回放':'松开以打开并关联到当前项目');
+  replayDropOverlay.querySelector('span').textContent='整个页面都可以放下 · 每次一个 .wotbreplay 文件';
+  replayDropOverlay.hidden=false;
+}
+function clearReplayDrop(){replayDragDepth=0;replayDropOverlay.hidden=true;}
+function acceptReplayDrop(files){
+  clearReplayDrop();
+  const blocked=replayDropBlocked();if(blocked)return notify(blocked,true);
+  if(!Array.isArray(files)||files.length!==1)return notify('请每次拖入一个 .wotbreplay 回放文件。',true);
+  const file=files[0],name=typeof file==='string'?file:file?.name;
+  if(typeof name!=='string'||!/\.wotbreplay$/i.test(name))return notify('仅支持 .wotbreplay 回放文件。',true);
+  if(state.home)createProjectFromReplay(file);else selectProjectReplay(file);
+}
+document.addEventListener('dragenter',event=>{if(!hasReplayDropFiles(event))return;event.preventDefault();replayDragDepth++;showReplayDrop(event);},true);
+document.addEventListener('dragover',event=>{if(!hasReplayDropFiles(event))return;event.preventDefault();showReplayDrop(event);},true);
+document.addEventListener('dragleave',event=>{if(!hasReplayDropFiles(event))return;event.preventDefault();if(--replayDragDepth<=0||!event.relatedTarget)clearReplayDrop();},true);
+document.addEventListener('drop',event=>{
+  if(!hasReplayDropFiles(event))return;
+  event.preventDefault();event.stopPropagation();acceptReplayDrop(Array.from(event.dataTransfer.files));
+},true);
+window.addEventListener('dragend',clearReplayDrop);
+window.addEventListener('blur',clearReplayDrop);
+document.addEventListener('keydown',event=>{if(event.key==='Escape')clearReplayDrop();},true);
 $("playProjectReplay").onclick=()=>action(async()=>{
   const path=state.timeline?.replay_file;
   if(!path)throw new Error('当前项目尚未绑定回放，请先载入回放。');
@@ -1737,6 +1850,7 @@ function renderSpeedRows(){
 }
 function drawSpeedGraph(){
  const svg=$("speedGraph");if(!svg)return;
+ const notice=$("speedWindowNotice");notice.hidden=true;notice.textContent='';
  const speed=speedCurveEditor?.drag?speedCurveEditor.speed():speedSettings(),first=state.timeline?.work_start_sec??state.samples[0]?.time_sec??0,duration=state.timeline?state.timeline.work_end_sec-first:(state.samples.at(-1)?.time_sec||0)-first;
  if(!BlitzPreviewTime.valid(speed)){BlitzPreviewTime.draw(svg,speed,0);$("speedPreviewReadout").textContent="请修正速度关键帧后预览。";return;}
  const t=BlitzPreviewTime.atWindowCamera(first,first+duration,speed,state.previewTime),live=state.playback;
@@ -1747,6 +1861,13 @@ function drawSpeedGraph(){
  const work=speed.mode==='curve'&&speed.time_range?(()=>{const r=speed.time_range;return [first,first+duration].map(v=>BlitzPreviewTime.atCamera(r.end_sec-r.start_sec,speed,(v-r.start_sec)/(r.end_sec-r.start_sec)).shootingProgress);})():null;
  BlitzPreviewTime.draw(svg,speed,active?(shooting+offset)/Math.max(.001,schedule):t.shootingProgress,{editable:true,selected:speedCurveEditor?.index()??-1,work,view:speedCurveEditor?.view});
  $("speedPreviewReadout").textContent=`${active?"游戏内":"离线预演"} · ${numberText(active?live.current_rate:outside?1:t.rate,3)}× · 拍摄 ${numberText(shooting,2)} / ${numberText(active?live.shooting_duration??schedule-offset:clock.seconds,2)} s · 战斗 +${numberText(active?live.replay_elapsed:isCameraOnly()?0:state.previewTime-clock.start,2)} s`;
+ const bounds=speed.mode==='curve'?speed.time_range:null;
+ if(!isCameraOnly()&&bounds){
+   const windowSeconds=BlitzPreviewTime.windowDuration(first,first+duration,speed);
+   if(first>=bounds.end_sec-1e-6)notice.textContent=`工作区在速度曲线之后，全程保持末尾 ${speed.keyframes.at(-1).rate}×；实际拍摄 ${numberText(windowSeconds,3)} 秒。`;
+   else if(first+duration<=bounds.start_sec+1e-6)notice.textContent=`工作区在速度曲线之前，全程保持起始 ${speed.keyframes[0].rate}×；实际拍摄 ${numberText(windowSeconds,3)} 秒。`;
+   notice.hidden=!notice.textContent;
+ }
 }
 $("replayFixedRate").addEventListener("change",()=>{stopPlayback();state.rateMode="fixed";state.speedFrames=[{progress:0,rate:Number($("replayFixedRate").value)},{progress:1,rate:Number($("replayFixedRate").value)}];sequenceEditor.changeSpeed(speedSettings());});
 function changeSpeedInterpolation(value){const s=speedSettings();s.interpolation=value;s.keyframes.forEach(k=>delete k.ease);stopPlayback();sequenceEditor.changeSpeed(s);}
@@ -1795,6 +1916,17 @@ if(hostBridge){
   $("winMax").addEventListener("click",()=>postWindow("maximize"));
   $("winClose").addEventListener("click",()=>postWindow("close"));
   hostBridge.addEventListener("message",e=>{
+    if(e?.data?.type==='project-folder-opened'){
+      const pending=folderOpenRequests.get(e.data.id);
+      if(pending){clearTimeout(pending.timer);folderOpenRequests.delete(e.data.id);e.data.error?pending.reject(new Error(e.data.error)):pending.resolve();}
+      return;
+    }
+    if(e?.data?.type==='replay-file-drag'){
+      if(e.data.phase==='drop')acceptReplayDrop(e.data.paths);
+      else if(e.data.phase==='leave')clearReplayDrop();
+      else showReplayDrop();
+      return;
+    }
     if(e?.data?.type==='flush-editor'){
       const id=e.data.id;window.BlitzFlushEditorSession().then(()=>hostBridge.postMessage({command:'editor-flushed',id,success:true})).catch(error=>hostBridge.postMessage({command:'editor-flushed',id,success:false,error:error.message}));return;
     }
@@ -1865,6 +1997,7 @@ function sizeText(n) {
 }
 function showHome(on) {
   if(!state.project)on=true;
+  if(on)captureEditorSession();
   closeHomeMenu();
   if(state.settingsOpen)closeSettings();
   state.home = on;
@@ -1873,15 +2006,37 @@ function showHome(on) {
   if (on) renderHome();
   else requestAnimationFrame(()=>restoreEditorSession());
 }
-async function renderHome() {
+async function renderHome({background=false}={}) {
   const request=++homeRequest;
-  homeLoading=true;homeError='';
-  paintHome();
+  homeLoading=true;
+  if(!background){homeError='';homePendingRefresh=null;paintHome();}
+  let items=homeItems,error='';
   try {
     const result=await api('/api/projects/recent');
-    if(request===homeRequest)homeItems=result.projects||[];
-  } catch(error) { if(request===homeRequest)homeError=error.message; }
-  finally{if(request===homeRequest){homeLoading=false;paintHome();}}
+    items=result.projects||[];
+  } catch(failure) { error=failure.message; }
+  finally{
+    if(request===homeRequest){
+      homeLoading=false;
+      if(background){homePendingRefresh={request,items,error};flushHomeRefresh();}
+      else{homeItems=items;homeError=error;paintHome();}
+    }
+  }
+}
+function flushHomeRefresh() {
+  if(!homePendingRefresh)return;
+  clearTimeout(homeRefreshTimer);
+  // pointerup precedes click. Commit only after the click handler has had a
+  // chance to open its project; never detach a button during its activation.
+  homeRefreshTimer=setTimeout(()=>{
+    const update=homePendingRefresh;
+    if(!update)return;
+    if(update.request!==homeRequest||!state.home){homePendingRefresh=null;return;}
+    if(homePointerActive||homeOpening||state.busy||state.settingsOpen||homeMenuItem||document.querySelector('dialog[open]'))return;
+    homePendingRefresh=null;
+    if(homeError===update.error&&JSON.stringify(homeItems)===JSON.stringify(update.items))return;
+    homeItems=update.items;homeError=update.error;paintHome();
+  },0);
 }
 function homeNode(tag,className,text) {
   const node=document.createElement(tag);node.className=className;
@@ -1908,9 +2063,10 @@ function homeReplaySummary(filename) {
 function homeMode(item){return item.shooting_mode==='camera_only'?'仅镜头':item.shooting_mode==='replay'?'随对局':'—';}
 function updateHomeControls() {
   const locked=state.busy||homeOpening||!state.serviceReady||state.playback.active;
-  for(const id of ['homeNew','homeNewName','homeOpen'])$(id).disabled=locked;
+  for(const id of ['homeNew','homeNewName','homeOpen','homeReplayDrop'])$(id).disabled=locked;
   document.querySelectorAll('.home-project-open').forEach(button=>{button.disabled=locked||button.dataset.exists!=='true';});
   document.querySelectorAll('#homeProjectMenu [data-home-action]').forEach(button=>{button.disabled=locked&&button.dataset.homeAction!=='info';});
+  flushHomeRefresh();
 }
 async function switchHomeProject(next) {
   if(state.busy||homeOpening||!state.serviceReady||state.playback.active)return;
@@ -1969,10 +2125,13 @@ function paintHome() {
   updateHomeControls();
 }
 function closeHomeMenu(restoreFocus=false) {
+  const active=document.activeElement;
+  if(!restoreFocus&&(active===homeMenuTrigger||$('homeProjectMenu').contains(active)))active?.blur();
   $('homeProjectMenu').hidden=true;
   homeMenuTrigger?.setAttribute('aria-expanded','false');
   if(restoreFocus&&homeMenuTrigger?.isConnected)homeMenuTrigger.focus();
   homeMenuItem=null;homeMenuTrigger=null;
+  flushHomeRefresh();
 }
 function showHomeMenu(item,trigger,keyboard=false) {
   if(homeMenuTrigger===trigger&&!keyboard){closeHomeMenu();return;}
@@ -1984,6 +2143,17 @@ function showHomeMenu(item,trigger,keyboard=false) {
   menu.style.left=Math.max(gap,Math.min(rect.right/scale-menu.offsetWidth,innerWidth/scale-menu.offsetWidth-gap))+'px';
   menu.style.top=Math.max(gap,rect.bottom/scale+menu.offsetHeight+gap<=innerHeight/scale?rect.bottom/scale+4:rect.top/scale-menu.offsetHeight-4)+'px';
   menu.querySelector('button').focus();
+}
+async function openProjectFolder(item){
+  const native=!!(hostBridge&&nativeHostState?.projectFolder);
+  const result=await api('/api/projects/open_folder',{path:item.path,native});
+  if(native)await new Promise((resolve,reject)=>{
+    const id=++folderOpenRequest,timer=setTimeout(()=>{folderOpenRequests.delete(id);reject(new Error('等待打开文件夹超时，请重试。'));},10000);
+    folderOpenRequests.set(id,{resolve,reject,timer});
+    try{hostBridge.postMessage({command:'open-project-folder',id,directory:result.directory});}
+    catch(error){clearTimeout(timer);folderOpenRequests.delete(id);reject(error);}
+  });
+  notify('已打开项目所在文件夹。');
 }
 function showHomeInfo(item) {
   $('homeInfoName').textContent=item.name;
@@ -2041,12 +2211,16 @@ $("homeOpen").addEventListener('click', () => switchHomeProject(() => openProjec
 $("homeFilter").addEventListener('input', paintHome);
 $("homeSort").addEventListener('change', paintHome);
 $('homeRetry').addEventListener('click',renderHome);
-window.addEventListener('focus',()=>{if(state.home&&state.serviceReady&&!state.busy&&!homeLoading&&!homeOpening&&!state.settingsOpen&&$('homeProjectMenu').hidden&&!document.querySelector('dialog[open]'))renderHome();});
+window.addEventListener('focus',()=>{if(state.home&&state.serviceReady&&!state.busy&&!homeLoading&&!homeOpening&&!state.settingsOpen&&$('homeProjectMenu').hidden&&!document.querySelector('dialog[open]'))renderHome({background:true});});
+document.addEventListener('pointerdown',()=>{homePointerActive=!!state.home;},true);
+for(const event of ['pointerup','pointercancel'])window.addEventListener(event,()=>{homePointerActive=false;flushHomeRefresh();},true);
+window.addEventListener('blur',()=>{homePointerActive=false;flushHomeRefresh();});
 $('homeProjectMenu').addEventListener('click',event=>{
   const button=event.target.closest('[data-home-action]'),item=homeMenuItem;
   if(!button||button.disabled||!item)return;
-  closeHomeMenu(true);
+  event.stopPropagation();closeHomeMenu(event.detail===0);
   if(button.dataset.homeAction==='info')showHomeInfo(item);
+  if(button.dataset.homeAction==='folder')action(()=>openProjectFolder(item));
   if(button.dataset.homeAction==='delete')deleteProjectFlow(item);
   if(button.dataset.homeAction==='forget')action(async()=>{
     await api('/api/projects/forget',{path:item.path});await renderHome();
@@ -2088,13 +2262,16 @@ function updateSettingsControls(){
   $('settingsButton').disabled=state.busy;
   $('projectDirectory').disabled=locked||!applicationSettings;
   $('uiScale').disabled=locked||!applicationSettings;
+  $('startupSound').disabled=locked||!applicationSettings;
   $('settingsBrowse').disabled=locked;
+  $('convertToBcn').disabled=locked;
+  $('convertToJson').disabled=locked;
   $('settingsDefault').disabled=locked||!applicationSettings;
   const manual=$('battleStartMode').value==='manual',seconds=settingsBattleStart();
   $('battleStartMode').disabled=locked||!applicationSettings;
   $('battleStartManual').hidden=!manual;$('battleStartSeconds').disabled=locked||!applicationSettings||!manual;
   const valid=!manual||$('battleStartSeconds').value.trim()!==''&&finite(seconds)&&seconds>=0&&seconds<=3600;
-  const changed=applicationSettings&&($('projectDirectory').value.trim()!==applicationSettings.project_directory||seconds!==applicationSettings.replay_keyframe_start_seconds||Number($('uiScale').value)!==applicationSettings.ui_scale);
+  const changed=applicationSettings&&($('projectDirectory').value.trim()!==applicationSettings.project_directory||seconds!==applicationSettings.replay_keyframe_start_seconds||Number($('uiScale').value)!==applicationSettings.ui_scale||($('startupSound').value==='true')!==applicationSettings.startup_sound);
   $('settingsSave').disabled=locked||!applicationSettings||!$('projectDirectory').value.trim()||!valid||!changed;
   $('settingsBack').disabled=state.busy;
   updateControlsSettings();
@@ -2114,15 +2291,17 @@ function updateControlsSettings(){
 }
 function selectSettingsSection(section){
   inputControls.cancelCapture();settingsSection=section;
-  for(const [name,prefix] of [['general','settingsGeneral'],['controls','settingsControls']]){
+  for(const [name,prefix] of [['general','settingsGeneral'],['controls','settingsControls'],['updates','settingsUpdates']]){
     $(prefix+'Panel').hidden=name!==section;$(prefix+'Tab').classList.toggle('active',name===section);
     if(name===section)$(prefix+'Tab').setAttribute('aria-current','page');else $(prefix+'Tab').removeAttribute('aria-current');
   }
   document.querySelector('.settings-main').scrollTop=0;
+  if(section==='updates')window.BlitzDeployment.refresh();
 }
 async function openSettings(){
   closeHomeMenu();
   stopPlayback();replayPreviewPane?.stopFlight();
+  captureEditorSession();
   state.settingsOpen=true;document.body.classList.add('settings-open');$('settingsView').hidden=false;
   $('settingsButton').setAttribute('aria-pressed','true');$('settingsBack').textContent=state.home?'返回主页':'返回工作台';
   settingsLoading=true;settingsMessage('正在读取设置…');updateSettingsControls();
@@ -2132,11 +2311,12 @@ async function openSettings(){
     applicationSettings=await api('/api/settings');$('projectDirectory').value=applicationSettings.project_directory;
     inputControls.apply(applicationSettings.input_controls);controlsEditor.load(applicationSettings.input_controls);
     $('uiScale').value=String(applicationSettings.ui_scale);
+    $('startupSound').value=String(applicationSettings.startup_sound);
     $('battleStartMode').value=applicationSettings.replay_keyframe_start_seconds===null?'auto':'manual';
     $('battleStartSeconds').value=applicationSettings.replay_keyframe_start_seconds??keyframeGuardFor().start_sec??0;
     settingsMessage('');renderBattleStartStatus();renderGlobalKeys();
   }catch(error){settingsMessage(error.message,true);}
-  finally{settingsLoading=false;updateSettingsControls();if(state.settingsOpen)$(settingsSection==='general'?'projectDirectory':'settingsControlsTab').focus();}
+  finally{settingsLoading=false;updateSettingsControls();if(state.settingsOpen)$(settingsSection==='general'?'projectDirectory':settingsSection==='updates'?'settingsUpdatesTab':'settingsControlsTab').focus();if(settingsSection==='updates')window.BlitzDeployment.refresh();}
 }
 function closeSettings(){
   inputControls.cancelCapture();
@@ -2147,7 +2327,7 @@ function closeSettings(){
 $('settingsButton').addEventListener('click',()=>state.settingsOpen?closeSettings():openSettings());
 $('settingsBack').addEventListener('click',closeSettings);
 $('projectDirectory').addEventListener('input',()=>{settingsMessage('');updateSettingsControls();});
-for(const id of ['battleStartMode','battleStartSeconds','uiScale'])$(id).addEventListener('input',()=>{settingsMessage('');updateSettingsControls();});
+for(const id of ['battleStartMode','battleStartSeconds','uiScale','startupSound'])$(id).addEventListener('input',()=>{settingsMessage('');updateSettingsControls();});
 for(const id of ['globalCaptureKey','globalHideKey'])$(id).addEventListener('click',()=>inputControls.capture($(id),{id,global:true},()=>$(id).dataset.binding,key=>{
   $(id).dataset.binding=key;$(id).textContent=inputControls.label(key);globalKeysEdited=true;
   const keys=[$('globalCaptureKey').dataset.binding,$('globalHideKey').dataset.binding];
@@ -2163,6 +2343,21 @@ $('applyGlobalKeys').addEventListener('click',()=>{
 renderGlobalKeys();
 $('settingsGeneralTab').onclick=()=>selectSettingsSection('general');
 $('settingsControlsTab').onclick=()=>selectSettingsSection('controls');
+$('settingsUpdatesTab').onclick=()=>selectSettingsSection('updates');
+for(const [id,format] of [['convertToBcn','.bcnproj'],['convertToJson','.json']]){
+  $(id).onclick=()=>action(async()=>{
+    const result=$('projectConversionResult');result.classList.remove('error');
+    try{
+      await window.BlitzFlushEditorSession();
+      result.textContent='请选择项目文件和保存位置…';
+      const converted=await api('/api/projects/convert',{format},{timeout:0});
+      result.textContent=converted.cancelled?'已取消转换。':`已转换并保存：${converted.path}。原文件已保留。`;
+      if(!converted.cancelled&&state.home)await renderHome();
+    }catch(error){result.textContent=error.message;result.classList.add('error');}
+  });
+}
+window.BlitzDeployment.mount({api,save:()=>window.BlitzFlushEditorSession(),refresh:refreshState,
+  close:()=>{if(hostBridge)hostBridge.postMessage({command:'window',action:'close'});else notify('请保存并关闭桌面应用，升级将自动继续。');}});
 $('controlsDefault').onclick=()=>controlsEditor.reset();
 $('controlsForm').addEventListener('submit',event=>{
   event.preventDefault();if($('controlsSave').disabled)return;
@@ -2184,7 +2379,7 @@ $('settingsBrowse').addEventListener('click',()=>action(async()=>{
 $('settingsForm').addEventListener('submit',event=>{
   event.preventDefault();if($('settingsSave').disabled)return;
   action(async()=>{
-    try{applicationSettings=await api('/api/settings',{project_directory:$('projectDirectory').value,replay_keyframe_start_seconds:settingsBattleStart(),ui_scale:Number($('uiScale').value)});$('projectDirectory').value=applicationSettings.project_directory;applyUIScale(applicationSettings.ui_scale);await refreshState();if(state.home)await renderHome();settingsMessage('设置已保存。');renderBattleStartStatus();}
+    try{applicationSettings=await api('/api/settings',{project_directory:$('projectDirectory').value,replay_keyframe_start_seconds:settingsBattleStart(),ui_scale:Number($('uiScale').value),startup_sound:$('startupSound').value==='true'});$('projectDirectory').value=applicationSettings.project_directory;applyUIScale(applicationSettings.ui_scale);await refreshState();if(state.home)await renderHome();settingsMessage('设置已保存。');renderBattleStartStatus();}
     catch(error){settingsMessage(error.message,true);}
   });
 });

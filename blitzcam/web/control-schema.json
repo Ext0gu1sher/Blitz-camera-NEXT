@@ -110,7 +110,7 @@
     },
     {
       "id": "rear",
-      "label": "回到主角背后",
+      "label": "回到主角背后 / 按住跟随",
       "key": "KeyX",
       "group": "镜头与机位",
       "scopes": [

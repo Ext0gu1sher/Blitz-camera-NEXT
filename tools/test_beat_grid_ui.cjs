@@ -13,16 +13,21 @@ const out=path.resolve('output/beat-grid-acceptance');fs.mkdirSync(out,{recursiv
   await page.locator('#tabBeat').click();const before=await read();assert.equal(before.height,310);assert.equal(before.settings.enabled,false);
   await page.locator('#beatEnabled').check();assert.equal((await read()).height,334);assert.equal((await read()).row,64);assert.equal((await read()).time,10);
   await page.evaluate(()=>sequenceEditor.action('workfit'));assert.ok(await page.locator('[data-beat]').count()>0);
-  await type('beatBpm','137.125');assert.equal((await read()).settings.bpm,137.125);
+  // BPM is a whole number: typed decimals round, and fractional/Shift drags accumulate before rounding.
+  await type('beatBpm','137.4');assert.equal((await read()).settings.bpm,137);assert.equal(await view('beatBpm').textContent(),'137');
   await type('beatOffset','-0.123456');assert.equal((await read()).settings.offset_sec,-.123456);
-  await page.locator('#beatBpm').locator('..').locator('[data-direction="1"]').click();assert.equal((await read()).settings.bpm,138.125);
+  await page.locator('#beatBpm').locator('..').locator('[data-direction="1"]').click();assert.equal((await read()).settings.bpm,138);
+  await page.keyboard.down('Shift');await page.locator('#beatBpm').locator('..').locator('[data-direction="1"]').click();await page.keyboard.up('Shift');assert.equal((await read()).settings.bpm,139);
+  await page.locator('#beatBpm').locator('..').locator('[data-direction="-1"]').click();
   await saved();let snapshot=await read();
   const rect=await view('beatBpm').boundingBox(),x=rect.x+rect.width/2,y=rect.y+rect.height/2;
-  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+12,y,{steps:4});
-  assert.equal((await read()).settings.bpm,150.125);await page.waitForTimeout(1650);assert.equal((await read()).revision,snapshot.revision);
+  await page.mouse.move(x,y);await page.mouse.down();for(let i=1;i<=24;i++){await page.mouse.move(x+i*.5,y);assert.ok(Number.isInteger((await read()).settings.bpm),'drag must keep whole BPM');}
+  assert.equal((await read()).settings.bpm,150);await page.waitForTimeout(1650);assert.equal((await read()).revision,snapshot.revision);
   await page.mouse.up();assert.equal((await read()).undo,snapshot.undo+1);await saved();
-  await page.keyboard.press('Control+z');assert.equal((await read()).settings.bpm,138.125);await page.keyboard.press('Control+Shift+z');assert.equal((await read()).settings.bpm,150.125);
-  await view('beatBpm').dblclick();await page.keyboard.type('301');await page.keyboard.press('Enter');assert.equal((await read()).settings.bpm,150.125);
+  await page.keyboard.press('Control+z');assert.equal((await read()).settings.bpm,138);await page.keyboard.press('Control+Shift+z');assert.equal((await read()).settings.bpm,150);
+  await page.mouse.move(x,y);await page.keyboard.down('Shift');await page.mouse.down();for(let i=1;i<=20;i++)await page.mouse.move(x+i*1.5,y);await page.mouse.up();await page.keyboard.up('Shift');
+  assert.equal((await read()).settings.bpm,153);await page.keyboard.press('Control+z');
+  await view('beatBpm').dblclick();await page.keyboard.type('301');await page.keyboard.press('Enter');assert.equal((await read()).settings.bpm,150);
   await view('beatOffset').dblclick();await page.keyboard.type('1.5');await page.keyboard.press('Escape');assert.equal((await read()).settings.offset_sec,-.123456);
   await type('beatOffset','0');await page.evaluate(()=>seek(16));await page.locator('[data-beat-origin="playhead"]').click();assert.ok(Math.abs((await read()).time-16)<1e-6);
   await page.evaluate(()=>seek(22));assert.ok(Math.abs((await read()).time-16)<1e-6);

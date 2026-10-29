@@ -2,7 +2,8 @@ import * as THREE from './vendor/three/build/three.module.js';
 import {GLTFLoader} from './vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import {OrbitControls} from './vendor/three/examples/jsm/controls/OrbitControls.js';
 import {PreviewGuides} from './preview-guides.js';
-import {createReplaySampler,cameraEvaluator,cameraBasis,cameraBehindVehicle,flightSeekSeconds,worldToScene,sceneToWorld,verticalAngle,nearestAngle} from './replay-preview-core.js';
+import {PreviewResources} from './preview-resources.js';
+import {createReplaySampler,cameraEvaluator,cameraBasis,cameraBehindVehicle,CameraMotionMeter,flightSeekSeconds,worldToScene,sceneToWorld,verticalAngle,nearestAngle} from './replay-preview-core.js';
 import {loadTerrain,buildGroundGeometry,makeGroundMaterial,groundLayerKeys,setupGroundTextures} from './vendor/wotbtools/groundPass.js';
 import {poseFromYPR,dropDuplicateGunMasks,neutralizeDefaultMetalness} from './vendor/wotbtools/glbRig.js';
 import {pruneForeignVariantsDetailed} from './vendor/wotbtools/variantFilter.js';
@@ -22,12 +23,12 @@ const json=async url=>{const r=await fetch(url);if(!r.ok)throw Error(`资源读�
 const texture=async url=>new THREE.TextureLoader().loadAsync(url);
 const gltf=async url=>(await new GLTFLoader().loadAsync(url)).scene;
 const vector=p=>new THREE.Vector3(...p);
-function dispose(root){const seen=new Set(),release=v=>{if(v?.isTexture&&!seen.has(v)){seen.add(v);v.dispose();}};root?.traverse(n=>{if(n.geometry&&!seen.has(n.geometry)){seen.add(n.geometry);n.geometry.dispose();}for(const m of [n.material].flat()){if(!m||seen.has(m))continue;seen.add(m);Object.values(m).forEach(release);for(const u of Object.values(m.uniforms||{}))for(const v of [u.value].flat())release(v);m.dispose();}});}
 
 export class ReplayPreviewPane {
   constructor(adapter){
     this.adapter=adapter;this.generation=0;this.source=null;this.data=null;this.sampler=null;this.active=false;this.view='observer';this.offset=0;this.time=0;this.models=new Map();this.templates=new Map();this.status='empty';this.lastTracks=null;this.pathSamples=null;this.mode='camera_only';
     this.flying=false;this.flightPending=false;this.flightKeys=new Set();this.flightVelocity=[0,0,0];this.flightSeek=null;this.flightSpeed=4;this.flightRequest=0;
+    this.motionMeter=new CameraMotionMeter();
     this.flightHost=window.chrome?.webview;
     $('retryPreview').onclick=()=>this.reload();
     $('previewEmpty').addEventListener('click',()=>this.activateEmpty());
@@ -37,7 +38,7 @@ export class ReplayPreviewPane {
     $('previewFly').onclick=()=>this.flying?this.stopFlight():this.startFlight();
     $('previewOffset').onchange=()=>{const n=Number($('previewOffset').value);if(!Number.isFinite(n)||Math.abs(n)>600){$('previewOffset').value=this.offset;return;}this.offset=n;this.storeOffset();this.render();};
     this.resizeObserver=new ResizeObserver(()=>this.render());this.resizeObserver.observe($('replayScene'));
-    window.addEventListener('pagehide',()=>{this.stopFlight();this.worker?.terminate();});
+    window.addEventListener('pagehide',()=>this.clear());
     window.addEventListener('blitz-controls-changed',()=>this.stopFlight());
   }
   message(text,error=false){$('previewStatus').textContent=text;$('previewStatus').classList.toggle('error',error);}
@@ -55,13 +56,14 @@ export class ReplayPreviewPane {
     $('previewFile').textContent='未选择回放';$('previewFile').title='';
     $('previewSourceFile').textContent='—';$('previewSourceFile').title='';
     $('previewMap').textContent='';$('previewStatus').title='';$('previewOffset').value=0;
-    this.syncReloadUI();this.message('点击“载入回放”或顶部按钮选择当前项目的回放。');this.empty('载入回放');
+    this.syncReloadUI();this.message('拖入 .wotbreplay 文件，或点击“载入回放”选择并关联当前项目的回放。');this.empty('载入回放');
   }
   update({mode,time,tracks,smooth,easing,samples,replayFile,projectPath}){
     if(this.projectPath!==projectPath){this.projectPath=projectPath;this.clear();}
     if(this.boundReplayFile!==replayFile){this.boundReplayFile=replayFile;if(!replayFile)this.clear();}
     const cameraChanged=this.mode!==mode||this.lastTracks!==tracks||this.lastSmooth!==smooth||this.lastEasing!==easing;
     // Playback and seeking advance the scene while the pilot keeps the camera.
+    if(cameraChanged||time<this.time||(this.time!==time&&!this.flying&&this.override))this.resetTelemetry();
     if(cameraChanged||(this.time!==time&&!this.flying)){this.stopFlight();this.override=null;}
     this.mode=mode;this.active=mode==='replay';this.time=time;
     document.querySelector('.preview-panel').classList.toggle('preview3d-active',this.active);
@@ -77,6 +79,7 @@ export class ReplayPreviewPane {
   storeOffset(){try{localStorage.setItem('blitz-preview-residual-offset:'+this.source.sha256,String(this.offset));}catch{}}
   syncReloadUI(){
     const disabled=this.status==='loading'||this.adapter.locked();
+    $('previewDropHint').hidden=!!this.boundReplayFile;
     $('retryPreview').disabled=!this.boundReplayFile||disabled;
     $('previewEmpty').setAttribute('aria-disabled',String(disabled));$('previewEmpty').tabIndex=disabled?-1:0;
     $('previewEmpty').title=this.boundReplayFile?'重新加载预览':'选择回放文件';
@@ -156,7 +159,7 @@ export class ReplayPreviewPane {
     this.orbit.addEventListener('change',()=>this.render());
     this.guides=new PreviewGuides();this.pathGroup=this.guides.root;this.scene.add(this.pathGroup);this.assetsGroup=new THREE.Group();this.scene.add(this.assetsGroup);
     this.glyphLabel=document.createElement('span');this.glyphLabel.className='preview-camera-label';this.glyphLabel.hidden=true;$('replayScene').append(this.glyphLabel);
-    $('previewOverrideReset').addEventListener('click',()=>{this.override=null;this.render();});
+    $('previewOverrideReset').addEventListener('click',()=>{this.override=null;this.resetTelemetry();this.render();});
     this.bindPilot();
     this.bindFlight();
   }
@@ -195,7 +198,7 @@ export class ReplayPreviewPane {
     const button=$('previewFly');button.hidden=this.view!=='camera';button.disabled=!available||this.flightPending;
     button.setAttribute('aria-pressed',String(this.flying));
     $('previewFlightHud').hidden=!this.flying;
-    $('previewFlightSpeed').textContent=`${this.flightSpeed} 档`;
+    $('previewFlightSpeed').textContent=`${this.flightSpeed} 档${this.followingRear()?' · 车后跟随 · 松开复位结束':''}`;
   }
   async startFlight(){
     if(this.flying||this.flightPending||!this.active||this.view!=='camera'||this.status!=='ready'||this.adapter.locked())return;
@@ -219,6 +222,7 @@ export class ReplayPreviewPane {
     // otherwise discard its override and restore the keyframed pose.
     if(hadCapture)this.adapter.pause?.();
     this.flying=false;this.flightPending=false;this.flightKeys.clear();this.flightVelocity=[0,0,0];this.flightSeek=null;
+    if(hadCapture)this.resetTelemetry();
     clearTimeout(this.flightTimeout);
     if(hadCapture&&this.flightHost)this.flightHost.postMessage({command:'flight',action:'stop',id:this.flightRequest});
     cancelAnimationFrame(this.flightFrame);this.flightFrame=0;
@@ -285,7 +289,7 @@ export class ReplayPreviewPane {
         return;
       }
       if(c.matches('rear',e)){
-        if(!e.repeat)this.resetFlightBehindPlayer();
+        if(!e.repeat&&this.resetFlightBehindPlayer()){this.flightKeys.add(chord);this.syncFlightUI();}
         return;
       }
       if(c.matches('recordPreview',e)){if(!e.repeat){this.stopFlight();this.record();}return;}
@@ -297,6 +301,7 @@ export class ReplayPreviewPane {
       if(!this.flying)return;e.preventDefault();e.stopImmediatePropagation();
       const before=this.seekDirection();controls().release(this.flightKeys,e.code);
       if(before!==this.seekDirection())this.syncFlightSeek(performance.now());
+      this.syncFlightUI();
     },true);
     document.addEventListener('mousemove',e=>{
       if(this.flightHost||!this.flying||document.pointerLockElement!==el)return;
@@ -330,12 +335,26 @@ export class ReplayPreviewPane {
     const frame=this.sampler?.recorderAt(this.time,this.offset),pose=cameraBehindVehicle(frame?.pose);
     if(!pose){this.message('当前时刻没有主角的可用位置，暂时无法回到车后视角。',true);return;}
     this.override=pose;this.flightKeys.clear();this.flightVelocity=[0,0,0];this.flightSeek=null;this.flightLast=performance.now();
-    this.message('已回到主角后方 · 可继续自由飞行');this.render();
+    this.resetTelemetry();this.rearUnavailable=false;
+    this.message('已回到主角后方 · 按住复位跟随，松开继续自由飞行');this.render();return true;
+  }
+  followingRear(){return this.flying&&controls().held('rear',this.flightKeys);}
+  followFlightBehindPlayer(){
+    if(!this.followingRear())return;
+    const frame=this.sampler?.recorderAt(this.time,this.offset),pose=cameraBehindVehicle(frame?.pose);
+    if(pose){
+      if(this.rearUnavailable){this.resetTelemetry();this.message('已恢复车后跟随 · 松开复位继续自由飞行');}
+      this.override=pose;this.rearUnavailable=false;
+    }else if(!this.rearUnavailable){
+      this.rearUnavailable=true;this.resetTelemetry();this.message('当前时刻没有主角的可用位置，暂时保持镜头。',true);
+    }
   }
   zoomFlight(delta){
+    if(this.followingRear())return;
     this.override.zoom=Math.min(90,Math.max(5,this.override.zoom*Math.exp(delta*.001)));this.render();
   }
   lookFlight(dx,dy){
+    if(this.followingRear())return;
     const o=this.override;if(!o)return;
     // Degrees per relative mouse count: independent of preview size, gentler on pitch.
     const gain=.055*controls().value('mouseSensitivity',1)*Math.tan(o.zoom*Math.PI/360)/Math.tan(Math.PI/6);
@@ -347,6 +366,10 @@ export class ReplayPreviewPane {
     this.flightFrame=0;if(!this.flying)return;
     if(!this.active||this.view!=='camera'||this.status!=='ready'||this.adapter.locked()){this.stopFlight();return;}
     const dt=Math.max(0,Math.min(.05,(now-this.flightLast)/1000));this.flightLast=now;
+    if(this.followingRear()){
+      this.flightVelocity=[0,0,0];this.advanceFlightSeek(now);
+      this.render();this.flightFrame=requestAnimationFrame(t=>this.advanceFlight(t));return;
+    }
     const c=controls(),held=id=>c.held(id,this.flightKeys)?1:0,o=this.override,b=cameraBasis(o.yaw,o.pitch,o.roll);
     const forward=held('forward')-held('backward'),right=held('right')-held('left'),up=held('up')-held('down');
     const direction=b.forward.map((v,i)=>v*forward+b.right[i]*right+(i===2?up:0));
@@ -379,33 +402,44 @@ export class ReplayPreviewPane {
   }
   resetScene(){
     this.stopFlight();
+    this.resetTelemetry();
     this.effects?.dispose();this.effects=null;
     this.manifest=null;this.status='empty';this.sampler=null;this.models.clear();this.override=null;this.pilot=null;this.evaluated=null;
-    for(const t of this.templates.values())dispose(t.model);this.templates.clear();this.terrain=null;this.terrainLod=null;this.animMaterials=[];
+    const resources=this.sceneResources||new PreviewResources();
+    for(const t of this.templates.values())resources.track(t.model);
+    resources.track(this.assetsGroup);resources.dispose();this.sceneResources=null;
+    this.templates.clear();this.terrain=null;this.terrainLod=null;this.field=null;this.heightMeta=null;this.animMaterials=[];
     clearSceneryMatCache();
-    if(this.assetsGroup){dispose(this.assetsGroup);this.assetsGroup.clear();}
+    this.assetsGroup?.clear();this.renderer?.renderLists.dispose();
     this.render();
   }
   async loadScene(manifest,gen){
+    if(gen!==this.generation)return;
     this.initRenderer();this.manifest=manifest;const urls=manifest.urls;
-    const doc=await new GLTFLoader().loadAsync(urls.scenery),scenery=doc.scene;
-    if(gen!==this.generation){dispose(scenery);return;}
+    const resources=this.sceneResources=new PreviewResources();let scenery,complete=false;
+    try{
+    const doc=await new GLTFLoader().loadAsync(urls.scenery);scenery=resources.track(doc.scene);
+    if(gen!==this.generation)return;
     const prune=pruneForeignVariantsDetailed(scenery,this.data.playback.meta.map_id);
     if(prune.failClosed)throw Error('地图变体映射不完整，已停止场景装配。');
     const terrain=await loadTerrain({binUrl:urls.terrain,metaUrl:urls.terrainMeta,fetchFn:fetch,stale:()=>gen!==this.generation});
     if(gen!==this.generation)return;if(!terrain.field)throw Error('地图高度场缺失或校验失败，未使用猜测地形。');
-    const [layers,mapTexture]=await Promise.all([urls.groundLayers?json(urls.groundLayers):null,texture(urls.ground)]);
-    if(gen!==this.generation){mapTexture.dispose();return;}
+    const [layers,mapTexture]=await Promise.all([urls.groundLayers?json(urls.groundLayers):null,texture(urls.ground).then(t=>resources.texture(t))]);
+    if(gen!==this.generation)return;
     let texs=null;
-    if(layers){texs={};await Promise.all(groundLayerKeys(layers).map(async k=>{if(!urls['ground/'+k])throw Error('地表贴图缺失：'+k);texs[k]=await texture(urls['ground/'+k]);}));setupGroundTextures(texs,Math.min(8,this.renderer.capabilities.getMaxAnisotropy()));mapTexture.dispose();}
+    if(layers){texs={};await Promise.all(groundLayerKeys(layers).map(async k=>{if(!urls['ground/'+k])throw Error('地表贴图缺失：'+k);texs[k]=resources.texture(await texture(urls['ground/'+k]));}));setupGroundTextures(texs,Math.min(8,this.renderer.capabilities.getMaxAnisotropy()));}
     else mapTexture.colorSpace=THREE.SRGBColorSpace;
     if(gen!==this.generation)return;
     this.field=terrain.field;this.heightMeta=terrain.meta;
     this.terrain=new THREE.Mesh(new THREE.BufferGeometry(),makeGroundMaterial({layers,texs,size:terrain.meta.span,mapTexture:layers?null:mapTexture}));this.assetsGroup.add(this.terrain);
     this.rebuildTerrain(true);
-    const extras=await resolveSceneryExtras(doc);if(gen!==this.generation){dispose(scenery);return;}
+    // Extras may introduce textures absent from the original GLB materials.
+    const dependency=doc.parser.getDependency.bind(doc.parser);
+    doc.parser.getDependency=(type,index)=>dependency(type,index).then(value=>type==='texture'?resources.texture(value):value);
+    const extras=await resolveSceneryExtras(doc);if(gen!==this.generation)return;
     const strictSurfaces=strictSurfacesOf(scenery);
     this.animMaterials=assembleSceneryMaterials(doc,{strictSurfaces,masks:makeTexResolvers(doc,extras),groundLayers:layers?{layers,texs}:null}).animLayerMats;
+    resources.track(scenery);
     scenery.traverse(n=>{if(isNonIntactStateName(n.name))n.visible=false;});
     const entries=collectInstanceEntries(scenery).filter(e=>{for(let n=e.node;n;n=n.parent)if(!n.visible)return false;return true;});
     const batchable=e=>!e.node.userData?.isSky&&!isWaterNode(e.name,e.material,{strictSurfaces})&&!hasTransparentMaterial(e.material);
@@ -418,8 +452,8 @@ export class ReplayPreviewPane {
     const errors=[...manifest.missing];
     const ids=Object.keys(manifest.vehicles);let loaded=0;
     for(const tid of ids){
-      const [model,rig]=await Promise.all([gltf(urls['vehicle/'+tid]),json(urls['rig/'+tid])]);
-      if(gen!==this.generation){dispose(model);return;}
+      const [model,rig]=await Promise.all([gltf(urls['vehicle/'+tid]).then(model=>resources.track(model)),json(urls['rig/'+tid])]);
+      if(gen!==this.generation)return;
       neutralizeDefaultMetalness(model);dropDuplicateGunMasks(model);this.templates.set(Number(tid),{model,rig});
       this.empty('正在载入回放…',{progress:.85+.15*++loaded/Math.max(1,ids.length),msg:`装配车辆 ${loaded}/${ids.length}`});
     }
@@ -444,6 +478,13 @@ export class ReplayPreviewPane {
     this.adapter.ready?.();
     // Deterministic diagnostics, consumed by automated acceptance. No game API.
     window.BlitzReplayPreviewDiagnostics=()=>({state:this.status,time:this.time,offset:this.offset,replayOrigin:this.sampler?.origin,rawTime:this.sampler?.rawTime(this.time,this.offset),engine:this.data?.engine,source:this.source?.sha256,map:this.manifest?.map.key,visible:[...this.models].filter(([,v])=>v.root.visible).map(([eid,v])=>({eid,p:v.root.position.toArray()})),camera:this.shot?.position.toArray(),quaternion:this.shot?.quaternion.toArray(),angle:this.shot?.fov,triangles:this.renderer.info.render.triangles,geometryCount:this.renderer.info.memory.geometries,view:this.view,guides:this.guides?.diagnostics(),effects:this.effects?.diagnostics()});
+    complete=true;
+    }finally{
+      resources.track(scenery);
+      if(complete)resources.track(this.assetsGroup);
+      else if(gen===this.generation){this.resetScene();this.data=null;}
+      else resources.dispose();
+    }
   }
   rig(root,metadata,def){
     if(!metadata?.model_origins?.track||!metadata?.model_origins?.turret)return null;
@@ -502,6 +543,20 @@ export class ReplayPreviewPane {
     const geo=buildGroundGeometry({field:this.field,n:this.heightMeta.size,span:this.heightMeta.span,cam:{x:c.position.x,y:c.position.y,z:c.position.z},fovY:c.fov*Math.PI/180,aspect:c.aspect});
     this.terrain.geometry.dispose();this.terrain.geometry=geo;
   }
+  resetTelemetry(){
+    this.motionMeter.reset();clearTimeout(this.motionIdleTimer);
+    $('previewCameraSpeed').textContent='镜头 0.00 m/s';
+  }
+  updateTelemetry(pose){
+    const ready=this.status==='ready'&&pose;
+    const speed=ready?this.motionMeter.sample(pose.position,performance.now()):0;
+    if(!ready)this.resetTelemetry();
+    $('previewCameraSpeed').textContent=ready?`镜头 ${speed.toFixed(2)} m/s`:'镜头 — m/s';
+    $('previewCameraFov').textContent=ready?`FOV ${pose.zoom.toFixed(1)}°`:'FOV —°';
+    clearTimeout(this.motionIdleTimer);
+    // Drag/wheel input can stop rendering while paused. Clear its final speed.
+    if(speed>0||this.motionMeter.distance>0)this.motionIdleTimer=setTimeout(()=>this.resetTelemetry(),180);
+  }
   render(){
     this.syncFlightUI();
     if(!this.active||!this.renderer)return;
@@ -509,6 +564,7 @@ export class ReplayPreviewPane {
     const w=rect.width,h=rect.height;
     if(this.renderWidth!==w||this.renderHeight!==h){this.renderer.setSize(w,h,false);this.renderWidth=w;this.renderHeight=h;}
     const base=this.evaluate?.(this.time);this.evaluated=base;
+    this.followFlightBehindPlayer();
     const pose=this.override||base;
     if(!pose&&this.view==='camera'){this.stopFlight();this.view='observer';$('previewCamera').setAttribute('aria-pressed','false');$('previewObserver').setAttribute('aria-pressed','true');}
     if(pose){const b=cameraBasis(pose.yaw,pose.pitch,pose.roll);this.shot.position.copy(vector(worldToScene(pose.position)));const matrix=new THREE.Matrix4().makeBasis(vector(worldToScene(b.right)),vector(worldToScene(b.up)),vector(worldToScene(b.forward)).negate());this.shot.quaternion.setFromRotationMatrix(matrix);this.shot.aspect=16/9;this.shot.fov=verticalAngle(pose.zoom,16/9);this.shot.updateProjectionMatrix();this.shot.updateMatrixWorld();}
@@ -530,6 +586,7 @@ export class ReplayPreviewPane {
     $('previewCamera').disabled=!pose;
     $('previewOverride').hidden=!this.override;
     $('previewSceneTime').textContent=`对局 ${this.time.toFixed(3)} s · ${this.view==='camera'?'实机':'场景观察'}`;
+    this.updateTelemetry(pose);
   }
   record(){
     if(this.status!=='ready'||this.adapter.locked())return;

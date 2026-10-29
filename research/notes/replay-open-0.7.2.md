@@ -4,7 +4,7 @@
 
 ## 直接证据
 
-`output/replay-open-071-mismatch-diagnostic.json`：
+`output/archive/2026-10-27/research/replay-open-071-mismatch-diagnostic.json`：
 
 - 启动记录的 PID 为 64604。
 - 实际唯一运行的 wotblitz.exe PID 为 65388，客户端路径相同。
@@ -24,11 +24,11 @@
 ## 验证
 
 - Python 225 项通过：补充启动器已退出且新 PID 承载同一文件时成功连接、不同文件/安装位置仍拒绝、启动参数读取错误保留原因等回归。
-- 全部合成 UI 验收通过，新增服务重启后的来源显示检查：`output/replay-open-072-acceptance/result.json`。模拟选择器/启动器未操作实际游戏。
-- 使用新核对函数只读验证正在运行的 PID 65388，成功匹配原启动记录 PID 64604 和原文件，`process_handoff=true`。记录 `output/replay-open-072-live-verification.json`。没有为了复现而关闭或重开用户游戏，也没有注入、写内存或操作游戏输入。
+- 全部合成 UI 验收通过，新增服务重启后的来源显示检查：`output/archive/2026-10-27/verification/replay-open-072-acceptance/result.json`。模拟选择器/启动器未操作实际游戏。
+- 使用新核对函数只读验证正在运行的 PID 65388，成功匹配原启动记录 PID 64604 和原文件，`process_handoff=true`。记录 `output/archive/2026-10-27/verification/replay-open-072-live-verification.json`。没有为了复现而关闭或重开用户游戏，也没有注入、写内存或操作游戏输入。
 
 ## 部署与实际重连
 
 服务已更新为 0.7.2，地址仍为 `http://127.0.0.1:56593/`，PID 60716。仅重启本工具服务和浮窗，未重启游戏。部署前后项目 SHA-256 相同：`2b85839db85f83d5df9d8b28523a8e7f1a0bd7fa7032d53b335ce0ce97df7843`。
 
-实际调用只读连接成功，启动参数来源与最初所选文件一致，全片 253.12938 秒。读取时游戏暂停于 47.92248344421387 秒，播放接管 inactive，项目未改变。相机对象发现耗时约 4 秒。记录 `output/replay-open-072-live-reconnect.json`。本次服务重启后没有恢复内存中的旧启动票据，因此实际连接来源标记为 `launch_argument`；原启动记录与新 PID 的核对已在前述独立只读验证中完成。
+实际调用只读连接成功，启动参数来源与最初所选文件一致，全片 253.12938 秒。读取时游戏暂停于 47.92248344421387 秒，播放接管 inactive，项目未改变。相机对象发现耗时约 4 秒。记录 `output/archive/2026-10-27/research/replay-open-072-live-reconnect.json`。本次服务重启后没有恢复内存中的旧启动票据，因此实际连接来源标记为 `launch_argument`；原启动记录与新 PID 的核对已在前述独立只读验证中完成。

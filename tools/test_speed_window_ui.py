@@ -10,12 +10,16 @@ from unittest.mock import patch
 from blitzcam.project import validate_project
 from blitzcam.pose import quaternion_from_angles
 from blitzcam.server import Workstation,make_handler
+from blitzcam.settings import read_settings, save_settings
 
 ROOT=Path(__file__).resolve().parents[1]
 
 
 def main(fixture='test_speed_window_ui.cjs'):
     with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp,patch('blitzcam.server.OUTPUT',Path(tmp)):
+        projects = (Path(tmp)/'isolated-projects').resolve()
+        save_settings(Path(tmp), {'project_directory': str(projects)})
+        assert Path(read_settings(Path(tmp))['project_directory']).resolve() == projects
         app=Workstation(Path(tmp)/'project.json');app.stop.set();app.poller.join()
         app.set_project(validate_project({'shooting_mode':'replay',
             'replay_timeline':{'time_basis':'replay','duration_sec':100,'work_start_sec':10,'work_end_sec':30},

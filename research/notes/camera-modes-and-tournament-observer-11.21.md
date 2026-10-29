@@ -20,7 +20,7 @@
 
 - 资源版本：`11.21.0.1235_7376187 release/11.21.0 WOTB_Win7`。
 - EXE SHA-256：`5030ee4b9f6ec7db1c06efa2b92f9dd7243574be5d8d9578c118119318bc9608`。
-- 本次解压的资源通过 DVPL 长度、CRC32 和解压后长度检查；副本保存在 `output/camera-mode-survey-20261024/decoded/`，索引和原资源哈希见同目录 `evidence.json`。
+- 本次解压的资源通过 DVPL 长度、CRC32 和解压后长度检查；副本保存在 `output/archive/2026-10-27/research/camera-mode-survey-20261024/decoded/`，索引和原资源哈希见同目录 `evidence.json`。
 
 | 证据 | 文件及行号（解压副本） | 意义 |
 | --- | --- | --- |

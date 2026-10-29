@@ -13,7 +13,8 @@ import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from unittest.mock import patch
 
-from blitzcam.server import Workstation, make_handler
+from blitzcam.server import make_handler
+from tests.fixtures.game_workstation import Workstation
 from blitzcam.project import validate_project
 from blitzcam.pose import quaternion_from_angles
 
@@ -84,7 +85,8 @@ def main(host_executable=None):
             server.server_close()
             thread.join()
 
-        with patch('blitzcam.server.OUTPUT', root):
+        with patch('blitzcam.server.OUTPUT', root), \
+                patch.dict(os.environ, {'BLITZCAM_PROFILE_ROOT': str(root/'account')}):
             app = Workstation(root/'project.json')
             app.stop.set()
             app.poller.join()

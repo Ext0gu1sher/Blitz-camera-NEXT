@@ -45,7 +45,7 @@ def main():
         env = dict(os.environ, NODE_PATH=str(Path.home()/'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'))
         try:
             with patch('blitzcam.server.CameraSession.connect', return_value=session), \
-                 patch('blitzcam.server.session_timeline', return_value={**info, 'source': 'launch_argument'}), \
+                 patch('blitzcam.server.session_timeline', return_value={**info, 'source':'runtime_replay', 'verification':'runtime_replay'}), \
                  patch('blitzcam.memory._kernel', side_effect=AssertionError('fixture accessed game')):
                 subprocess.run(['node', str(ROOT/'tools/test_reconnect_status_ui.cjs'),
                                 f'http://127.0.0.1:{server.server_port}'], env=env, cwd=ROOT, check=True)

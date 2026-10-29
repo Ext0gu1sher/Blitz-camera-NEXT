@@ -19,7 +19,9 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def main():
     report=ROOT/'output/startup-acceptance';report.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp,patch('blitzcam.server.OUTPUT',Path(tmp)):
+    with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp,patch('blitzcam.server.OUTPUT',Path(tmp)), \
+         patch.dict(os.environ,{'BLITZCAM_PROFILE_ROOT':str(Path(tmp)/'account')}), \
+         patch('blitzcam.settings.documents_directory',return_value=Path(tmp)/'Documents'):
         app=Workstation(Path(tmp)/'project.json');app.stop.set();app.poller.join()
         app.set_project(validate_project({'shooting_mode':'camera_only','keyframes':[
             {'time_sec':t,'position':[t,0,20],'quaternion':quaternion_from_angles(0,0,0),'horizontal_fov_deg':60} for t in (0,8)]}))

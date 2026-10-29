@@ -13,7 +13,6 @@ import unittest
 import zipfile
 
 import test_build_profiles as fixtures
-from test_replay_arguments import ArgumentMemory, fake_query
 from blitzcam.hook_guards import controller_extra, same_scene, validate_snapshot
 from blitzcam.hook_layout import PathPoint, Quat, Vec
 from blitzcam.playback import config_for
@@ -46,38 +45,16 @@ def controller_fixture(kind="CinemaCameraController", base=None):
 
 
 class CinemaControllerTests(unittest.TestCase):
-    def test_legacy_argument_verification_has_the_same_result_for_both_controllers(self):
-        # Exercise the actual Windows argument reader with archived camera data.
-        # No game process or playback hook is opened by this test.
-        with tempfile.TemporaryDirectory() as folder:
-            replay = Path(folder) / "同一份回放.wotbreplay"
-            with zipfile.ZipFile(replay, "w") as archive:
-                archive.writestr("meta.json", json.dumps({"battleDuration": 253.1}))
-            for kind in ("CinemaCameraController", "SpectatorCameraController"):
-                for has_file in (True, False):
-                    with self.subTest(kind=kind, has_file=has_file):
-                        memory = controller_fixture(kind)
-                        memory.profile = replace(memory.profile, replay_file_source_offset=None)
-                        session = CameraSession(memory)
-                        session.discover()
-                        args = [str(ArgumentMemory([]).info.path)]
-                        if has_file:
-                            args.append(str(replay))
-                        startup = ArgumentMemory(args)
-                        memory.blocks.update(startup.blocks)
-                        memory.info.path = startup.info.path
-                        memory.handle = startup.handle
-                        launch = {"executable": str(memory.info.path), "info": file_timeline(replay)}
-                        with fake_query():
-                            if has_file:
-                                actual = session_timeline(session)
-                                result = verify_launch_source(memory.info, launch, actual)
-                                self.assertEqual(result["verification"], "launch_arguments")
-                                self.assertEqual(actual["replay_sha256"], launch["info"]["replay_sha256"])
-                            else:
-                                with self.assertRaisesRegex(ReplaySourceUnavailable, "启动参数未包含回放文件"):
-                                    session_timeline(session)
-                        self.assertEqual(session.capture()["native_controller"]["kind"], kind)
+    def test_unsupported_file_reader_keeps_both_camera_types_usable(self):
+        for kind in ("CinemaCameraController", "SpectatorCameraController"):
+            with self.subTest(kind=kind):
+                memory = controller_fixture(kind)
+                memory.profile = replace(memory.profile, replay_file_source_offset=None)
+                session = CameraSession(memory)
+                session.discover()
+                with self.assertRaisesRegex(ReplaySourceUnavailable, "尚未适配游戏内回放文件读取"):
+                    session_timeline(session)
+                self.assertEqual(session.capture()["native_controller"]["kind"], kind)
 
     def test_both_supported_controllers_discover_and_capture_under_remote_aslr(self):
         for kind in ("CinemaCameraController", "SpectatorCameraController"):

@@ -96,7 +96,7 @@
 
 - `python -B -m unittest tests.test_replay_preview tests.test_replay_clock`：17 项通过，包括已有姿态、炮管方向和时钟相关验证。
 - `tools/verify_replay_pose.mjs` 使用现有真实 FVE Defender 回放项目副本：14 辆车、3,479 个采样时刻、44,470 次车辆状态采样。姿态有限、关键点严格递增、正向/反向查询一致，解析输入与原回放哈希未改变。
-- 报告：`output/tracking-research-20261025/pose-verification.json`。
+- 报告：`output/archive/2026-10-27/research/tracking-research-20261025/pose-verification.json`。
 
 上述验证证明现有采样基础可以复用，没有测试尚未实现的跟踪功能，也没有比较真实游戏逐帧画面。此真实回放脚本调用的是不带车型俯仰限制参数的解析入口；炮管方向相关验证来自既有定向测试，不能把这次整段采样检查当成炮口精度验收。
 

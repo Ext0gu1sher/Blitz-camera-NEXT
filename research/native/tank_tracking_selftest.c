@@ -29,6 +29,22 @@ int main(void){
  U(tc,8)=0;assert(!tracking_validate());U(tc,8)=v;
  m[0]=2;assert(!tracking_validate());m[0]=1;
  c->upper.x=31;assert(tracking_pose(&p,.080)==31);
+ c->upper.x=1000;t->smooth_seconds=0;t->preset=3;t->anchor[2]=0;t->distance=3;t->height=.3;t->orbit_degrees=90;
+ uint32_t parts[5],pt=(uint32_t)(uintptr_t)calloc(1,0xa8);assert(pt);
+ for(int i=0;i<5;i++){parts[i]=(uint32_t)(uintptr_t)calloc(1,0x40);assert(parts[i]);}
+ for(int i=0;i<5;i++){
+  U(parts[i],0)=0x3762c90;U(parts[i],0x14)=c->scene;U(parts[i],0x18)=i==4?v:parts[i+1];
+  if(i<4)t->part_parents[i]=parts[i+1];
+ }
+ t->part_entity=parts[0];t->part_transform=pt;U(parts[0],0x3c)=pt;U(pt,0)=0x3724564;U(pt,8)=parts[0];
+ float*pm=(float*)(uintptr_t)(pt+0x60);pm[0]=pm[5]=pm[10]=pm[15]=1;pm[12]=40;pm[13]=-10;pm[14]=12;
+ assert(tracking_validate());assert(tracking_pose(&p,0)==0);
+ assert(dist(p.position,(Vec){43,-10,12.3f})<1e-5&&dist(tracking_used,(Vec){40,-10,12})<1e-5);
+ pm[12]+=1;assert(tracking_pose(&p,.016)==0);assert(tracking_used.x==41&&p.position.x==44);
+ U(parts[2],0x18)=v;assert(!tracking_validate());U(parts[2],0x18)=parts[3];
+ U(pt,8)=v;assert(!tracking_validate());U(pt,8)=parts[0];
+ pm[5]=2;assert(!tracking_validate());pm[5]=1;
+ for(int i=0;i<5;i++)free((void*)(uintptr_t)parts[i]);free((void*)(uintptr_t)pt);
  free((void*)(uintptr_t)v);free((void*)(uintptr_t)tc);
  printf("tracking native math: 275 headings/pitches; target identity, matrix, lag, damping, bounds passed; config=%u event=%u shared=%u\n",(unsigned)sizeof(TrackConfig),(unsigned)sizeof(TrackEvent),(unsigned)sizeof(Tracking));
  return 0;

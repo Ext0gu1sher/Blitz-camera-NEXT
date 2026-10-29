@@ -12,7 +12,7 @@ from blitzcam import replay_seek as seek
 from blitzcam.playback import PositionPlayback
 from blitzcam.profile import CameraError, PROFILE_1121, SessionChanged
 from blitzcam.project import atomic_json
-from blitzcam.server import Workstation
+from tests.fixtures.game_workstation import Workstation
 from blitzcam.seek_phase_trial import Config, Header, UiRepairState
 from tests.test_replay_preparation import project
 

@@ -1,0 +1,35 @@
+body:not(.edition-pro) [data-requires-hook],
+body:not(.edition-pro) #playProjectReplay,
+body:not(.edition-pro) #connectButton,
+body:not(.edition-pro) #disconnectButton,
+body:not(.edition-pro) #openOverlay,
+body:not(.edition-pro) #paneCamera .prop-grid,
+body:not(.edition-pro) .capture-row,
+body:not(.edition-pro) #liveControls,
+body:not(.edition-pro) #livePause,
+body:not(.edition-pro) #connectionDot,
+body:not(.edition-pro) #connectionLabel,
+body:not(.edition-pro) #connectionMessage,
+body:not(.edition-pro) #replayLaunchMessage,
+body:not(.edition-pro) #liveMessage,
+body:not(.edition-pro) #startupSoundSection,
+body:not(.edition-pro) [aria-labelledby="hotkeyTitle"]{display:none!important}
+.edition-pro .offline-camera-note{display:none}
+.offline-camera-note{padding:22px 16px;color:var(--text-muted,#999);line-height:1.8;font-size:12px}
+.tb-brand .brand-next.brand-pro{color:#e65ab4;letter-spacing:.02em;font-weight:750;text-transform:none}
+.deployment-card{max-width:760px;margin-bottom:18px}
+.deployment-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}
+.deployment-heading h3{margin:0}
+.deployment-version{color:var(--text-muted,#aaa);font-size:12px}
+.deployment-actions{display:flex;gap:12px;margin-top:20px;flex-wrap:wrap}
+.deployment-preview{margin-top:24px;padding-top:20px;border-top:1px solid #37373b}
+.deployment-preview dl{display:grid;grid-template-columns:80px minmax(0,1fr);gap:12px;margin:0 0 18px;font-size:13px}
+.deployment-preview dt{color:#999}.deployment-preview dd{margin:0;overflow-wrap:anywhere}
+#deploymentNotes{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7;color:#b6b6bd;font-size:13px}
+#deploymentResult{display:block;margin:18px 0 0;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+body:not(.edition-pro) section[data-panel="connection"],
+body:not(.edition-pro) section[data-panel="telemetry"],
+body:not(.edition-pro) section[data-panel="capture"],
+body:not(.edition-pro) .mini-live-buttons,
+body:not(.edition-pro) #miniLiveStatus,
+body:not(.edition-pro) #miniProgress{display:none!important}

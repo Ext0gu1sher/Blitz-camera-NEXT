@@ -25,10 +25,10 @@
 - `tools.test_desktop_controls`：真实 Windows 两键注册、重复键、外部占用回滚、无悬浮窗时发送一次记录请求；原生窗口最小化恢复、手动隐藏、折叠及多次显隐；记录前保存，保存失败取消。
 - `tools.test_overlay_ui`：完整七轨、工作区间、属性与速率点 Ctrl+点击、数值和拖动、模式切换、边缘滚动、撤销重做、持久化及回放启动回归全部通过。
 
-原生布局和桥接复核通过：830 像素悬浮窗内全部快捷键设置可见；工作台与悬浮窗分别修改后，另一窗口显示原生实际新值。报告 `output/desktop-controls-acceptance/layout-bridge-result.json`。
+原生布局和桥接复核通过：830 像素悬浮窗内全部快捷键设置可见；工作台与悬浮窗分别修改后，另一窗口显示原生实际新值。报告 `output/archive/2026-10-27/verification/desktop-controls-acceptance/layout-bridge-result.json`。
 
-截图与报告位于 `output/settings-acceptance`、`output/keyframe-guard-app-acceptance`、`output/desktop-controls-acceptance`。
+截图与报告位于 `output/archive/2026-10-27/verification/settings-acceptance`、`output/archive/2026-10-27/verification/keyframe-guard-app-acceptance`、`output/archive/2026-10-27/verification/desktop-controls-acceptance`。
 
-0.9.4 便携包通过迁移到含中文和空格的独立目录后的内置运行时、全通道编译、原生 WebView2 开屏、编辑保存、JSON 导出、重复启动复用服务、关闭后退出服务以及悬浮窗显隐验收。报告位于 `output/desktop-094-acceptance`。
+0.9.4 便携包通过迁移到含中文和空格的独立目录后的内置运行时、全通道编译、原生 WebView2 开屏、编辑保存、JSON 导出、重复启动复用服务、关闭后退出服务以及悬浮窗显隐验收。报告位于 `output/archive/2026-10-27/verification/desktop-094-acceptance`。
 
 这些验收使用独立模拟窗口、合成镜头和协议样本，不连接实际游戏、不加载 Hook。实际模组环境和实机游戏交互仍需用户核对。

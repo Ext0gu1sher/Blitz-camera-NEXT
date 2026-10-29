@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    with tempfile.TemporaryDirectory(dir=ROOT/'output') as folder, patch('blitzcam.server.OUTPUT',Path(folder)), \
+    with tempfile.TemporaryDirectory(dir=ROOT/'output') as folder, \
+         patch.dict(os.environ, {'BLITZCAM_PROFILE_ROOT': str(Path(folder)/'account')}), \
+         patch('blitzcam.server.OUTPUT',Path(folder)), \
          patch('blitzcam.settings.documents_directory',return_value=Path(folder)/'Documents'):
         root = Path(folder).resolve()
         app = Workstation(root/'project.json');app.stop.set();app.poller.join()
@@ -34,11 +36,14 @@ def main():
         env['NODE_PATH'] = str(Path.home()/'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules')
         try:
             with patch('blitzcam.server.recycle_project',side_effect=recycle), \
+                    patch('blitzcam.server.os.startfile') as open_folder, \
                     patch('blitzcam.server.CameraSession.connect',side_effect=AssertionError('game access')), \
                     patch.object(app.playback,'start',side_effect=AssertionError('game playback')):
                 subprocess.run(['node',str(ROOT/'tools/test_project_management_ui.cjs'),
                     f'http://127.0.0.1:{server.server_address[1]}',alpha,beta,forgotten,str(replay)],
                     cwd=ROOT,env=env,check=True)
+                assert open_folder.call_count == 3
+                assert all(call.args == (str(projects), 'explore') for call in open_folder.call_args_list)
         finally:
             server.shutdown();server.server_close();thread.join();app.close()
 

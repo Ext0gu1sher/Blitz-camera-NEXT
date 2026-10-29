@@ -1,0 +1,11 @@
+{
+  "config_size": 376,
+  "header_size": 92,
+  "header_offset": 376,
+  "shared_size": 468,
+  "fault_size": 3676,
+  "ui_state_size": 316,
+  "ui_event_size": 48,
+  "sha256": "427643ebb1e764fa97062734b1257807efe7b18778425931e60869ffc35b0efb",
+  "dll": "replay_seek_phase_trial_1121.427643ebb1e7.dll"
+}

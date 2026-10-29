@@ -61,12 +61,19 @@ const out=path.resolve('output/speed-window-acceptance');fs.mkdirSync(out,{recur
   await page.evaluate(()=>seek(12));await page.locator('.seq-scroll').focus();await page.keyboard.press('i');
   assert.equal((await read()).data.timeline.work_start_sec,12);assert.deepEqual((await read()).times,original.times);
   await page.locator('[data-action=undo]').click();await page.locator('[data-action=undo]').click();
-  await save();await page.reload();await page.waitForFunction(()=>state.loaded&&sequenceEditor?.doc);
+  await save();await page.reload();await enterFixture(page);await page.waitForFunction(()=>state.loaded&&sequenceEditor?.doc);
   const loaded=await read();assert.deepEqual(loaded.times,original.times);assert.deepEqual(loaded.data.speed,original.data.speed);
   assert.equal(loaded.data.timeline.work_end_sec,18);
   for(const end of [26,35,15,30,12,18]){await range(10,end);const changed=await read();assert.deepEqual(changed.times,original.times);assert.deepEqual(changed.data.speed,original.data.speed);}
   await range(2,38);const extended=await read();assert.deepEqual(extended.times,original.times);
   const holds=await page.evaluate(()=>[3,35].map(t=>BlitzPreviewTime.atWindowCamera(2,38,speedSettings(),t).rate));assert.deepEqual(holds,[1,1]);
+  await range(32,38);await page.locator('#tabSpeed').click();
+  assert.equal(await page.locator('#speedWindowNotice').isVisible(),true);
+  assert.match(await page.locator('#speedWindowNotice').textContent(),/全程保持末尾 1×/);
+  assert.match(await page.locator('#speedWindowNotice').textContent(),/实际拍摄 6\.000 秒/);
+  await page.locator('#paneSpeed').screenshot({path:path.join(out,'curve-tail-notice.png')});
+  await range(2,7);assert.match(await page.locator('#speedWindowNotice').textContent(),/全程保持起始 1×/);
+  await range(2,38);assert.equal(await page.locator('#speedWindowNotice').isVisible(),false);
   // Adding a key after the authored curve may extend it without moving old knots.
   await page.evaluate(()=>sequenceEditor.add('rate',36));const added=await read();assert.equal(added.times.length,5);
   for(let i=0;i<4;i++)assert.ok(Math.abs(added.times[i]-original.times[i])<1e-8);assert.equal(added.times[4],36);

@@ -1,12 +1,13 @@
 /* Experimental extension, inserted into a copy of position_hook_1121.c.
  * The production source and DLL are never edited. Z-up world, row-vector TRS.
- * This follows one scene-bound TankVisual root, not a physics/network position.
+ * Follows a scene-bound TankVisual root or its validated gunFireJoint chain.
  */
 #define TRACK_CAP 4096
 #pragma pack(push,4)
 typedef struct {
  uint32_t magic,size,visual,transform,eid,preset,lag_frames,phase;
  float distance,height,anchor[3],orbit_degrees,smooth_seconds;
+ uint32_t part_entity,part_transform,part_parents[4];
 } TrackConfig;
 typedef struct {
  volatile LONG commit;
@@ -17,20 +18,15 @@ typedef struct {
 } TrackEvent;
 typedef struct {TrackConfig cfg;TrackEvent records[TRACK_CAP];} Tracking;
 #pragma pack(pop)
-_Static_assert(sizeof(TrackConfig)==60,"tracking config ABI");
+_Static_assert(sizeof(TrackConfig)==84,"tracking config ABI");
 _Static_assert(sizeof(TrackEvent)==120,"tracking event ABI");
 API Tracking g_tracking;
 static Vec tracking_previous,tracking_used,tracking_position;
 static int tracking_has_previous,tracking_has_position;
 static double tracking_previous_t;
 
-static int tracking_read(float*matrix,Vec*root,Vec*anchor){
- TrackConfig*t=&g_tracking.cfg;Config*c=&g_shared.cfg;
- if(!readable(t->visual,0x60)||!readable(t->transform,0xa8)||
-    U(t->visual,0)!=live(0x3713afc)||U(t->visual,0x14)!=c->scene||
-    U(t->visual,0x58)!=t->eid||U(t->visual,0x3c)!=t->transform||
-    U(t->transform,0)!=live(0x3724564)||U(t->transform,8)!=t->visual)return 0;
- memcpy(matrix,(void*)(uintptr_t)(t->transform+0x60),64);
+static int tracking_matrix(uint32_t transform,float*matrix){
+ memcpy(matrix,(void*)(uintptr_t)(transform+0x60),64);
  for(int i=0;i<16;i++)if(!isfinite(matrix[i]))return 0;
  if(fabsf(matrix[3])+fabsf(matrix[7])+fabsf(matrix[11])+fabsf(matrix[15]-1)>1e-5)return 0;
  for(int i=0;i<3;i++){
@@ -41,8 +37,31 @@ static int tracking_read(float*matrix,Vec*root,Vec*anchor){
    if(fabs(dot)>.002)return 0;
   }
  }
+ return 1;
+}
+
+static int tracking_read(float*matrix,Vec*root,Vec*anchor){
+ TrackConfig*t=&g_tracking.cfg;Config*c=&g_shared.cfg;
+ if(!readable(t->visual,0x60)||!readable(t->transform,0xa8)||
+    U(t->visual,0)!=live(0x3713afc)||U(t->visual,0x14)!=c->scene||
+    U(t->visual,0x58)!=t->eid||U(t->visual,0x3c)!=t->transform||
+    U(t->transform,0)!=live(0x3724564)||U(t->transform,8)!=t->visual||
+    !tracking_matrix(t->transform,matrix))return 0;
  *root=(Vec){matrix[12],matrix[13],matrix[14]};
- *anchor=*root;
+ if(t->preset==3){
+  /* gunFireJoint -> gunJoint -> maskJoint -> turretJoint -> hullJoint -> TankVisual. */
+  uint32_t entity=t->part_entity;
+  for(int i=0;i<5;i++){
+   uint32_t parent=i==4?t->visual:t->part_parents[i];
+   if(!readable(entity,0x40)||U(entity,0)!=live(0x3762c90)||
+      U(entity,0x14)!=c->scene||U(entity,0x18)!=parent)return 0;
+   entity=parent;
+  }
+  if(!readable(t->part_transform,0xa8)||U(t->part_entity,0x3c)!=t->part_transform||
+     U(t->part_transform,0)!=live(0x3724564)||U(t->part_transform,8)!=t->part_entity||
+     !tracking_matrix(t->part_transform,matrix))return 0;
+ }
+ *anchor=(Vec){matrix[12],matrix[13],matrix[14]};
  for(int j=0;j<3;j++)for(int i=0;i<3;i++)((float*)anchor)[j]+=t->anchor[i]*matrix[i*4+j];
  return 1;
 }
@@ -60,7 +79,7 @@ static Quat tracking_look(Vec p,Vec a){
 
 static int tracking_validate(void){
  TrackConfig*t=&g_tracking.cfg;
- if(t->magic!=0x31544b42||t->size!=sizeof(TrackConfig)||t->preset>2||t->lag_frames>1||t->phase>1||
+ if(t->magic!=0x31544b42||t->size!=sizeof(TrackConfig)||t->preset>3||t->lag_frames>1||t->phase>1||
     !isfinite(t->distance)||t->distance<3||t->distance>100||
     !isfinite(t->height)||fabsf(t->height)>30||
     !isfinite(t->orbit_degrees)||fabsf(t->orbit_degrees)>90||
@@ -81,6 +100,12 @@ static int tracking_pose(PathPoint*pose,double elapsed){
  double heading=atan2(matrix[5],matrix[4]);
  double angle=heading+(t->preset==1?PI/2:PI)+(t->preset==2?local*t->orbit_degrees*PI/180:0);
  Vec p={root.x+(float)(cos(angle)*t->distance),root.y+(float)(sin(angle)*t->distance),root.z+t->height};
+ if(t->preset==3){
+  /* For a muzzle shot orbit_degrees is a fixed side angle about the barrel. */
+  double side=t->orbit_degrees*PI/180;
+  for(int j=0;j<3;j++)((float*)&p)[j]=((float*)&anchor)[j]+
+      matrix[j]*t->distance*(float)sin(side)+matrix[4+j]*t->distance*(float)cos(side)+matrix[8+j]*t->height;
+ }
  if(t->smooth_seconds>0&&tracking_has_position){
   double dt=fmax(0,elapsed-tracking_previous_t),a=-expm1(-dt/t->smooth_seconds);
   p=(Vec){(float)(tracking_position.x+(p.x-tracking_position.x)*a),

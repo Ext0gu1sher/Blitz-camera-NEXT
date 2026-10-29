@@ -20,6 +20,9 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.equal(await page.locator('#wb').evaluate(el=>el.inert),true);
   assert.equal(await page.locator('#appSplash').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(23, 23, 23)');
   assert.equal(await page.locator('.bc-footnote').textContent(),'爱吹灭火器的思源 - 2026');
+  assert.equal(await page.locator('.pv-shot').first().isVisible(),false);
+  const next=await page.locator('.bc-next').boundingBox(),splash=await page.locator('#appSplash').boundingBox();
+  assert.ok(Math.abs(next.x+next.width/2-(splash.x+splash.width/2))<1);
   await pause(2100);await page.screenshot({path:path.join(out,'brand.png')});
   await ready(page);assert.equal(await page.locator('#appSplash').isVisible(),false);assert.equal(await page.locator('#wb').evaluate(el=>el.inert),false);
   await page.screenshot({path:path.join(out,'workbench.png')});await page.close();
@@ -55,7 +58,7 @@ const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.match(await scene.locator('.bc-error').textContent(),/回放资源无法读取/);await scene.locator('#startupContinue').click();await ready(scene);await scene.close();
 
   const home=await pageFor({reducedMotion:'reduce'});await home.goto(base+'/?home=1');await ready(home);
-  assert.equal(await home.locator('#homeView').isVisible(),true);assert.equal(await home.locator('.home-title').textContent(),'最近项目');
+  assert.equal(await home.locator('#homeView').isVisible(),true);assert.equal(await home.locator('.home-title').textContent(),'项目');
   await home.locator('#settingsButton').click();await home.waitForFunction(()=>!settingsLoading);assert.equal(await home.locator('#settingsView').isVisible(),true);await home.close();
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.deepEqual(game,[]);
   const result={passed:true,opaqueUntilReady:true,normalAnimation:true,slowSampleWait:true,slowSceneWait:true,failureRetry:true,partialFailureEnterEditor:true,reducedMotion:true,realHomeAndWorkbench:true,errors,external,game};

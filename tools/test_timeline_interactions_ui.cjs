@@ -69,6 +69,15 @@ const base=process.argv[2],out=path.resolve('output/timeline-074-acceptance');fs
   assert.match(await page.locator('[data-key-warning]').textContent(),/12\.000000.*12\.022000.*0\.022000/);
   await page.locator('.sequence-panel').screenshot({path:path.join(out,'timeline-interactions.png')});
   await page.locator('[data-action=undo]').click();assert.equal(await page.locator('[data-key-warning]').isVisible(),false);
+  // Alt+wheel zoom-out stops at the whole replay (mode two) or ten minutes (mode one), never leaving an undrawn tail.
+  const zoomOut=async()=>{const r=await page.locator('.seq-scroll').boundingBox();await page.mouse.move(r.x+r.width*.7,r.y+r.height/2);await page.keyboard.down('Alt');for(let i=0;i<80;i++)await page.mouse.wheel(0,120);await page.keyboard.up('Alt');
+    return page.evaluate(()=>{const e=sequenceEditor;return {scale:e.scale,min:(e.scroll.clientWidth-32)/(e.free()?600:e.total()),content:e.content.getBoundingClientRect().width/(globalThis.BlitzUIScale||1),view:e.scroll.clientWidth,total:e.total(),free:e.free()};});};
+  for(const mode of ['replay','camera_only']){
+    if(mode==='camera_only')await page.evaluate(()=>sequenceEditor.setMode('camera_only',state.timeline));
+    const z=await zoomOut();assert.ok(Math.abs(z.scale-z.min)<1e-9,`${mode} zoom floor ${z.scale} != ${z.min}`);
+    assert.ok(z.content>=z.view-2,`${mode} content ${z.content} narrower than view ${z.view}`);
+    if(z.free)assert.ok(z.total*z.scale>=z.view-32,'mode one horizon covers the zoomed-out view');
+  }
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:true,scope:'synthetic fixture only',checks:['Ctrl-click all seven camera tracks at clicked time','rate Ctrl-click anchored after integral changes','selection and dragging do not seek playhead','default speed 1x clears intermediate rate keys','reset undo redo and persistence','camera tracks and work area preserved','near-key warning does not merge keys'],errors},null,2));
   console.log('PASS: Ctrl-click property and rate keys, stationary playhead, speed reset and near-key warning (synthetic).');

@@ -1,0 +1,39 @@
+{
+  "adapter_api": 1,
+  "host_min_version": "0.9.6-beta",
+  "python": "CPython 3.11 x64 host",
+  "client_architecture": "x86",
+  "required_modules": ["playback", "hook_guards", "hook_layout", "hook_transport", "replay_trial", "seek_trial", "seek_phase_trial", "replay_seek", "replay_preparation", "freecamera", "profile", "reader", "memory", "replay_source"],
+  "shared_host_modules": ["pose", "project", "speed", "trajectory", "replay_timeline"],
+  "entrypoints": {
+    "reader:CameraSession": ["connect", "capture", "close"],
+    "playback:PositionPlayback": ["state", "start", "stop", "pause", "prepare", "seek"]
+  },
+  "signatures": {
+    "CameraSession.connect": "classmethod connect(cls, pid=None) -> session",
+    "CameraSession.capture": "capture(self, require_paused=True) -> snapshot dict",
+    "CameraSession.close": "close(self) -> None; release memory handles",
+    "PositionPlayback.__init__": "__init__(self, output); output is a Path; expose cancel: threading.Event",
+    "PositionPlayback.state": "state(self) -> independent state dict",
+    "PositionPlayback.prepare": "prepare(self, project, reference, locate_only, adopt_session, orientation_enabled=True, fov_enabled=True)",
+    "PositionPlayback.seek": "seek(self, project, reference, adopt_session, invalidate_session, reopen_replay=None)",
+    "PositionPlayback.start": "start(self, trajectory, reference, reverse=False, orientation_enabled=True, fov_enabled=True)",
+    "PositionPlayback.pause": "pause(self, paused=True)",
+    "PositionPlayback.stop": "stop(self, wait=False); cancel safely and restore game state"
+  },
+  "required_result_fields": {
+    "capture": ["schema_version", "captured_at_utc", "monotonic", "session_id", "build", "replay", "camera", "raw_camera", "quality", "native_controller", "addresses", "capabilities"],
+    "build": ["version", "sha256", "path"],
+    "playback_state": ["state", "active", "message", "progress", "hooks_detached"]
+  },
+  "loader_rules": [
+    "All adapter-to-adapter and adapter-to-host imports are relative",
+    "CameraError, SessionChanged and IncoherentSample are aliased to host exception classes",
+    "Native DLL paths resolve relative to module __file__ under native/",
+    "Do not access or modify game processes during import",
+    "Session.profile.sha256 must match release.client.sha256",
+    "Session capture/state return shapes and callbacks remain compatible with the frozen 0.9.6 host",
+    "New host modules, entrypoints or calling conventions require a new API and a host update"
+  ],
+  "note": "Static checks verify declared dependencies and entrypoint presence, not behavior. Add regression evidence and explicitly record whether live game verification was performed."
+}

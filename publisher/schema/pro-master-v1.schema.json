@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Blitz Camera internal Pro master manifest v1",
+  "description": "Canonical UTF-8 JSON manifest.json inside .bcpro. Archive also contains payload/ and evidence/. See README for identity and path validation rules. This is not a signed distribution format.",
+  "type": "object", "additionalProperties": false,
+  "required": ["format", "release", "files", "evidence", "master_id"],
+  "properties": {
+    "format": {"const": "blitz-camera-pro-master-v1"},
+    "release": {"$ref": "pro-source-v1.schema.json#/properties/release"},
+    "files": {"$ref": "#/$defs/hashMap"},
+    "evidence": {"allOf": [{"$ref": "#/$defs/hashMap"}], "minProperties": 1, "maxProperties": 32},
+    "master_id": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of canonical manifest with master_id omitted"}
+  },
+  "$defs": {
+    "hashMap": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "description": "Case-insensitively unique relative POSIX paths with Windows reserved names/traversal rejected by packages.file_map"}
+  }
+}

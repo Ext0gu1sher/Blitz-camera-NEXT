@@ -12,7 +12,7 @@ from blitzcam.pose import quaternion_from_angles
 from blitzcam.hook_guards import angle_difference
 from blitzcam.project import validate_project
 from blitzcam.profile import CameraError,PROFILE_1121
-from blitzcam.server import Workstation
+from tests.fixtures.game_workstation import Workstation
 
 def trajectory(timing='keyframes',easing='linear'):
     return validate_project({'timing':timing,'easing':easing,'keyframes':[

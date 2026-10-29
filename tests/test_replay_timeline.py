@@ -60,6 +60,37 @@ class ReplayTimelineTests(unittest.TestCase):
                 self.assertTrue(all(a.time<b.time for a,b in zip(rows,rows[1:])))
                 self.assertEqual(p.to_dict(),before)
 
+    def test_reported_late_replay_window_uses_length_not_absolute_timestamp(self):
+        from blitzcam.speed import playback_timing
+        p=project();p.replay_timeline.update(work_start_sec=243.597,work_end_sec=255.983)
+        for mode,rate,seconds in (('paused',1,12.386),('fixed',1,12.386),('fixed',.25,49.544)):
+            with self.subTest(mode=mode,rate=rate):
+                p.replay_speed.update(mode=mode,rate=rate)
+                window=playback_window(p,{'replay':{'time':243.597}})
+                rows,duration=compile_positions(window)
+                self.assertAlmostEqual(duration,12.386,places=5)
+                self.assertAlmostEqual(playback_timing(window,p.replay_speed)[0],seconds)
+                self.assertEqual(rows[0].time,0)
+        p.replay_speed.update(mode='fixed',rate=.0625)
+        window=playback_window(p,{'replay':{'time':243.597}})
+        self.assertAlmostEqual(window.shooting_seconds,198.176)
+        self.assertAlmostEqual(playback_timing(window,p.replay_speed)[0],198.176)
+
+    def test_logged_curve_tail_allows_long_slow_motion_without_retiming(self):
+        from blitzcam.speed import playback_timing
+        p=project();p.replay_timeline.update(work_start_sec=243.597194335,work_end_sec=255.983333333)
+        p.replay_speed.update(mode='curve',rate=1,camera_clock='replay',interpolation='smooth',
+            keyframes=[{'progress':0.,'rate':1.},{'progress':.01889739416069203,'rate':1.},{'progress':1.,'rate':.0625}],
+            time_range={'start_sec':14.948461532592773,'end_sec':243.5971943346165})
+        before=p.to_dict()
+        window=playback_window(p,{'replay':{'time':243.60595321655273}})
+        self.assertAlmostEqual(window.duration,12.377380116447256)
+        self.assertAlmostEqual(playback_timing(window,p.replay_speed)[0],198.0380818631561)
+        rows,duration=compile_positions(window)
+        self.assertLess(len(rows),1600)
+        self.assertAlmostEqual(duration,12.377380116447256,places=5)
+        self.assertEqual(p.to_dict(),before)
+
     def test_absolute_window_rejects_wrong_time_and_battle_reverse(self):
         for now in (0,29,60,120):
             with self.subTest(now=now),self.assertRaises(CameraError):

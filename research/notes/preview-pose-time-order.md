@@ -22,4 +22,4 @@
 
 `tests/fixtures/replay_pose_validation.mjs` 覆盖平滑曲线与旧网格的正确求值、倒序/重复时间拒绝、隐藏与覆盖门禁、输入不变以及缺列/非有限值拒绝。`tools/verify_replay_pose.mjs` 使用实际 WASM 解析项目绑定回放，遍历整个基础时间网格并反向查询，要求所有车辆保留升序平滑曲线，检查有限位姿及输入不变；支持指定源码/便携版 `--web-root` 和隔离候选引擎 `--engine-root`。
 
-候选 v0.4.11 实测：FVE / Faust 14 辆车全部保留有效平滑曲线，3,479 个采样时刻、44,470 个车辆帧通过有限值及前后拖动一致性检查；Maus / Canal 14 辆车同样通过（2,572 时刻、26,745 车辆帧）。本轮离线相关测试 51 项通过。原生桌面完整场景验收使用隔离的便携副本，无游戏连接或 Hook 执行；报告见 `output/desktop-094-acceptance/result.json`。
+候选 v0.4.11 实测：FVE / Faust 14 辆车全部保留有效平滑曲线，3,479 个采样时刻、44,470 个车辆帧通过有限值及前后拖动一致性检查；Maus / Canal 14 辆车同样通过（2,572 时刻、26,745 车辆帧）。本轮离线相关测试 51 项通过。原生桌面完整场景验收使用隔离的便携副本，无游戏连接或 Hook 执行；报告见 `output/archive/2026-10-27/verification/desktop-094-acceptance/result.json`。

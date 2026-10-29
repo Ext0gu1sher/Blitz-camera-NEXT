@@ -5,7 +5,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -41,7 +43,14 @@ namespace BlitzCamera {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr GetShellWindow();
+    [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(uint processId);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int command);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h,StringBuilder name,int size);
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    public delegate bool EnumWindowProc(IntPtr h,IntPtr param);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowProc callback,IntPtr param);
     public delegate void WinEventProc(IntPtr hook, uint ev, IntPtr h, int obj, int child, uint thread, uint time);
     [DllImport("user32.dll")] public static extern IntPtr SetWinEventHook(uint first, uint last, IntPtr module, WinEventProc callback, uint process, uint thread, uint flags);
     [DllImport("user32.dll")] public static extern bool UnhookWinEvent(IntPtr hook);
@@ -99,6 +108,8 @@ namespace BlitzCamera {
     public string HideKey = "F9";
     public string CaptureKey = "F8";
     public bool HideHotkeyRegistered,CaptureHotkeyRegistered,GameMinimized,GameInactive;
+    public bool GameFeatures;
+    Forms.ToolStripItem overlayMenu,layoutMenu;
     public bool AutoHidden {get{return GameMinimized||GameInactive;}}
     public IntPtr Game;
     public Native.Rect Area;
@@ -135,16 +146,17 @@ namespace BlitzCamera {
         hotkeyWindow.AddHook(Hotkey);RegisterKeys(HideKey,CaptureKey);
         foregroundCallback=delegate {Application.Current.Dispatcher.BeginInvoke(new Action(delegate {if(!shuttingDown)RefreshVisibility(false);}));};
         foregroundHook=Native.SetWinEventHook(3,3,IntPtr.Zero,foregroundCallback,0,0,0);
-        tray=new Forms.NotifyIcon {Icon=AppIcon.Drawing,Text="Blitz Camera · 悬浮摄影面板",Visible=true};
+        tray=new Forms.NotifyIcon {Icon=AppIcon.Drawing,Text="Blitz Camera",Visible=true};
         var menu=new Forms.ContextMenuStrip();
-        menu.Items.Add("显示 / 隐藏悬浮窗",null,delegate {ToggleOverlay();});
+        overlayMenu=menu.Items.Add("显示 / 隐藏悬浮窗",null,delegate {ToggleOverlay();});overlayMenu.Visible=GameFeatures;
         menu.Items.Add("打开完整工作台",null,delegate {OpenWorkbench();});
-        menu.Items.Add("重置窗口布局",null,delegate {ResetLayout();});
+        layoutMenu=menu.Items.Add("重置窗口布局",null,delegate {ResetLayout();});layoutMenu.Visible=GameFeatures;
         menu.Items.Add("退出 Blitz Camera",null,delegate {if(Workbench!=null)Workbench.Close();else Shutdown();});
         tray.ContextMenuStrip=menu;tray.DoubleClick+=delegate {Reveal();};
         if(warnings.Count>0)NotifyError(string.Join("；",warnings.ToArray()));
         }
-        Environment=await CoreWebView2Environment.CreateAsync(null,Path.Combine(Root,"output/overlay-webview"));
+        var browserOptions=new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
+        Environment=await CoreWebView2Environment.CreateAsync(null,Path.Combine(Root,"output/overlay-webview"),browserOptions);
         Panels.Add("connection",new PanelWindow(this,"connection","BLITZ CAMERA · 连接回放",ConnectionW,ConnectionH,ConnectionSettingsH));
         Panels.Add("telemetry",new PanelWindow(this,"telemetry","实时数据",272,TelemetryH));
         Panels.Add("capture",new PanelWindow(this,"capture","记录属性关键帧",272,CaptureH));
@@ -152,11 +164,11 @@ namespace BlitzCamera {
         try{foreach(var k in (System.Collections.IEnumerable)Layout["collapsed"]){var kind=Convert.ToString(k);if(Panels.ContainsKey(kind))Panels[kind].ToggleCollapsed();}}catch{}
         followTimer=new DispatcherTimer(DispatcherPriority.Render){Interval=TimeSpan.FromMilliseconds(16)};
         followTimer.Tick+=delegate{RefreshPlacement();};
-        if(!Smoke)FindGame();GetArea();RefreshVisibility(false);PositionAll();
-        if(StartWorkbench||workbenchRequested)OpenWorkbench();
+        if(!Smoke&&GameFeatures)FindGame();GetArea();RefreshVisibility(false);PositionAll();
+        if(StartWorkbench||workbenchRequested||!GameFeatures)OpenWorkbench();
         timer=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(250)};
         timer.Tick+=delegate {
-          if(++ticks%8==0&&!Smoke)FindGame();RefreshPlacement();
+          if(++ticks%8==0&&!Smoke&&GameFeatures)FindGame();RefreshPlacement();
           if(!Smoke)RefreshVisibility(false);if(ticks%8==0)WriteStatus();
         };
         timer.Start();RefreshVisibility(false);WriteStatus();
@@ -200,7 +212,7 @@ namespace BlitzCamera {
     bool RegisterKeys(string hide,string capture) {
       hide=ValidKey(hide);capture=ValidKey(capture);
       if(hide==capture)throw new ArgumentException("显示/隐藏与打关键帧快捷键不能相同。");
-      if(Smoke||hotkeyWindow==null){HideKey=hide;CaptureKey=capture;return true;}
+      if(Smoke||hotkeyWindow==null||!GameFeatures){HideKey=hide;CaptureKey=capture;return true;}
       string oldHide=HideKey,oldCapture=CaptureKey;
       UnregisterKeys();
       bool hideOk=RegisterKey(1,hide),captureOk=RegisterKey(2,capture);
@@ -228,7 +240,7 @@ namespace BlitzCamera {
       else{RegisterKeys(HideKey,CaptureKey);Broadcast(Status());WriteStatus();}
     }
     IntPtr Hotkey(IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled) {
-      if(msg==0x312){if(!capturingShortcut){if(w.ToInt32()==1)ToggleOverlay();else if(w.ToInt32()==2)CaptureKeyframe();}handled=true;}return IntPtr.Zero;
+      if(msg==0x312){if(GameFeatures&&!capturingShortcut){if(w.ToInt32()==1)ToggleOverlay();else if(w.ToInt32()==2)CaptureKeyframe();}handled=true;}return IntPtr.Zero;
     }
     public void Broadcast(object value){foreach(var p in Panels.Values)p.Send(value);if(Workbench!=null)Workbench.Send(value);}
     public bool SendFeedback(string target,object value){
@@ -247,6 +259,7 @@ namespace BlitzCamera {
     void NotifyError(string message){if(tray!=null)tray.ShowBalloonTip(5000,"Blitz Camera",message,Forms.ToolTipIcon.Warning);}
     async void CaptureKeyframe(){await CaptureKeyframeAsync();}
     public async Task CaptureKeyframeAsync(string source=null){
+      if(!GameFeatures)return;
       if(capturePending||shuttingDown)return;capturePending=true;
       string target=source??FeedbackTarget(Native.GetForegroundWindow());
       try{
@@ -364,19 +377,43 @@ namespace BlitzCamera {
       bool previouslyHidden=AutoHidden;
       GameMinimized=Game!=IntPtr.Zero&&Native.IsIconic(Game);
       GameInactive=Game!=IntPtr.Zero&&!ForegroundAllowsOverlay(foreground);
-      bool show=!Hidden&&!AutoHidden,created=false;
+      bool show=GameFeatures&&!Hidden&&!AutoHidden,created=false;
       if(show)RefreshPlacement();
       foreach(var p in Panels.Values)created|=p.SetShown(show,!force&&!GameMinimized&&Game!=IntPtr.Zero);
       if(created)PositionAll();
+      if(show)RestoreOverlayOrder();
       if(followTimer!=null){if(show&&Game!=IntPtr.Zero)followTimer.Start();else followTimer.Stop();}
       if(previouslyHidden!=AutoHidden&&Workbench!=null)Workbench.Send(Status());
     }
-    public void SetOverlayHidden(bool value){Hidden=value;RefreshVisibility(true);if(!value)PositionAll();Broadcast(Status());WriteStatus();}
+    void RestoreOverlayOrder(){
+      // WS_EX_TOPMOST only identifies a band: a topmost game can still cover
+      // an individual panel in that band. Check actual order once per refresh,
+      // and leave already-correct windows alone so polling cannot churn Z order.
+      if(Smoke||Game==IntPtr.Zero||(Native.GetWindowLong(Game,-20)&0x8)==0)return;
+      var covered=new HashSet<IntPtr>(Panels.Values.Where(p=>p.WantsVisible&&p.Shown).Select(p=>p.Handle));
+      if(covered.Count==0)return;
+      bool foundGame=false;
+      Native.EnumWindows(delegate(IntPtr window,IntPtr param){
+        if(window==Game){foundGame=true;return false;}
+        covered.Remove(window);return covered.Count>0;
+      },IntPtr.Zero);
+      if(!foundGame)return;
+      foreach(var p in Panels.Values)if(covered.Contains(p.Handle))
+        Native.SetWindowPos(p.Handle,new IntPtr(-1),0,0,0,0,0x13); // NOSIZE | NOMOVE | NOACTIVATE
+    }
+    public void SetGameFeatures(bool enabled){
+      if(GameFeatures==enabled)return;GameFeatures=enabled;
+      if(overlayMenu!=null)overlayMenu.Visible=enabled;if(layoutMenu!=null)layoutMenu.Visible=enabled;
+      if(enabled)RegisterKeys(HideKey,CaptureKey);
+      else {if(hotkeyWindow!=null)UnregisterKeys();HideHotkeyRegistered=CaptureHotkeyRegistered=false;warnings.Clear();Hidden=true;}
+      RefreshVisibility(true);Broadcast(Status());WriteStatus();
+    }
+    public void SetOverlayHidden(bool value){Hidden=!GameFeatures||value;RefreshVisibility(true);if(!Hidden)PositionAll();Broadcast(Status());WriteStatus();}
     public void ToggleOverlay(){SetOverlayHidden(!Hidden);}
-    public void Reveal(){SetOverlayHidden(false);}
+    public void Reveal(){if(GameFeatures)SetOverlayHidden(false);else OpenWorkbench();}
     public void ResetLayout(){Layout.Remove("positions");Layout.Remove("anchors");Layout.Remove("collapsed");foreach(var p in Panels.Values)p.Expand();PositionAll();SaveLayout();}
     public void SaveCollapsed(){Layout["collapsed"]=Panels.Values.Where(p=>p.Collapsed).Select(p=>p.Kind).ToArray();SaveLayout();}
-    public Dictionary<string,object> Status(){return new Dictionary<string,object>{{"type","host-state"},{"hidden",Hidden},{"autoHidden",AutoHidden},{"gameMinimized",GameMinimized},{"gameInactive",GameInactive},{"opacity",Opacity},{"hideKey",HideKey},{"captureKey",CaptureKey},{"hideHotkeyRegistered",HideHotkeyRegistered},{"captureHotkeyRegistered",CaptureHotkeyRegistered},{"gameFound",Game!=IntPtr.Zero},{"warnings",warnings.ToArray()}};}
+    public Dictionary<string,object> Status(){return new Dictionary<string,object>{{"type","host-state"},{"projectFolder",true},{"hidden",Hidden},{"autoHidden",AutoHidden},{"gameMinimized",GameMinimized},{"gameInactive",GameInactive},{"opacity",Opacity},{"hideKey",HideKey},{"captureKey",CaptureKey},{"hideHotkeyRegistered",HideHotkeyRegistered},{"captureHotkeyRegistered",CaptureHotkeyRegistered},{"gameFound",Game!=IntPtr.Zero},{"warnings",warnings.ToArray()}};}
     public void SaveLayout() {
       Layout["opacity"]=Opacity;Layout["hide_key"]=HideKey;Layout["capture_key"]=CaptureKey;Layout.Remove("pass_key");Layout.Remove("positions");
       var temp=layoutFile+".tmp";File.WriteAllText(temp,Json.Serialize(Layout));if(File.Exists(layoutFile))File.Replace(temp,layoutFile,null);else File.Move(temp,layoutFile);
@@ -516,7 +553,7 @@ namespace BlitzCamera {
     bool exportCompleted;
     readonly Host host;
     readonly FlightMouse flight;
-    bool initialized,closePending;
+    bool initialized,closePending,openingProjectFolder;
     int closeRequest;
     int flushRequest;
     readonly Dictionary<int,TaskCompletionSource<bool>> editorFlushRequests=new Dictionary<int,TaskCompletionSource<bool>>();
@@ -530,7 +567,25 @@ namespace BlitzCamera {
         CornerRadius=new CornerRadius(0),UseAeroCaptionButtons=false});
       if(host.Smoke){WindowStartupLocation=WindowStartupLocation.Manual;Left=-32000;Top=-32000;Opacity=0;ShowInTaskbar=false;ShowActivated=false;}
       var frame=new Border{Background=Background};
-      Web=new WebView2CompositionControl{MinWidth=64,MinHeight=64,DefaultBackgroundColor=System.Drawing.Color.FromArgb(255,23,23,23)};frame.Child=Web;Content=frame;
+      // Composition WebView does not forward Explorer's OLE drops to the DOM.
+      // Receive FileDrop at the WPF window, including every child hit target.
+      AllowDrop=true;
+      Web=new WebView2CompositionControl{MinWidth=64,MinHeight=64,AllowDrop=true,AllowExternalDrop=false,DefaultBackgroundColor=System.Drawing.Color.FromArgb(255,23,23,23)};frame.Child=Web;Content=frame;
+      PreviewDragEnter+=ReplayDragOver;PreviewDragOver+=ReplayDragOver;
+      PreviewDragLeave+=delegate(object s,DragEventArgs e){
+        if(!e.Data.GetDataPresent(DataFormats.FileDrop))return;
+        e.Handled=true;Send(new{type="replay-file-drag",phase="leave"});
+      };
+      PreviewDrop+=delegate(object s,DragEventArgs e){
+        if(!e.Data.GetDataPresent(DataFormats.FileDrop))return;
+        e.Handled=true;e.Effects=DragDropEffects.None;
+        if(!Ready||closePending)return;
+        try{
+          var paths=e.Data.GetData(DataFormats.FileDrop) as string[];
+          Send(new{type="replay-file-drag",phase="drop",paths=paths??new string[0]});
+          e.Effects=e.AllowedEffects&DragDropEffects.Copy;
+        }catch(Exception error){Send(new{type="replay-file-drag",phase="leave"});Send(new{type="host-error",message="读取拖入文件失败："+error.Message});}
+      };
       flight=new FlightMouse(this,Web);
       Deactivated+=delegate{host.SetShortcutCapture(false);};
       Closed+=delegate{host.SetShortcutCapture(false);};
@@ -568,13 +623,33 @@ namespace BlitzCamera {
             }
             var operation=e.DownloadOperation;operation.StateChanged+=delegate{if(operation.State==CoreWebView2DownloadState.Completed)exportCompleted=true;};
           };
-          Web.CoreWebView2.WebMessageReceived+=delegate(object s,CoreWebView2WebMessageReceivedEventArgs e){
+          Web.CoreWebView2.WebMessageReceived+=async delegate(object s,CoreWebView2WebMessageReceivedEventArgs e){
             if(!host.SameOrigin(e.Source))return;
             try{
               var m=Host.Json.Deserialize<Dictionary<string,object>>(e.WebMessageAsJson);
               var command=Convert.ToString(m["command"]);
               if(command=="ready")Send(host.Status());
+              else if(command=="edition")host.SetGameFeatures(Convert.ToBoolean(m["enabled"]));
+              else if(command=="replay-drop-path"){
+                int id=Convert.ToInt32(m["id"]);
+                try{
+                  var objects=e.AdditionalObjects;
+                  if(objects==null||objects.Count!=1)throw new InvalidOperationException("请每次拖入一个 .wotbreplay 回放文件。");
+                  var file=objects[0] as CoreWebView2File;
+                  string path=file==null?null:file.Path;
+                  if(String.IsNullOrWhiteSpace(path)||!Path.IsPathRooted(path)||!String.Equals(Path.GetExtension(path),".wotbreplay",StringComparison.OrdinalIgnoreCase)||!File.Exists(path))
+                    throw new InvalidOperationException("请选择有效的 .wotbreplay 回放文件。");
+                  Send(new{type="replay-drop-path",id=id,path=path});
+                }catch(Exception error){Send(new{type="replay-drop-path",id=id,error=error.Message});}
+              }
               else if(command=="settings")host.ApplySettings(m,"workbench");
+              else if(command=="open-project-folder"){
+                int id=Convert.ToInt32(m["id"]);
+                try{
+                  await OpenProjectFolder(Convert.ToString(m["directory"]));
+                  Send(new{type="project-folder-opened",id=id});
+                }catch(Exception error){Send(new{type="project-folder-opened",id=id,error=error.Message});}
+              }
               else if(command=="shortcut-capture")host.SetShortcutCapture(Convert.ToBoolean(m["active"]));
               else if(command=="dirty")Dirty=Convert.ToBoolean(m["value"]);
               else if(command=="editor-flushed"){
@@ -605,6 +680,94 @@ namespace BlitzCamera {
           Web.CoreWebView2.Navigate(host.Url);
         }catch(Exception e){File.WriteAllText(Path.Combine(host.Root,"output/desktop-error.txt"),e.ToString());if(!host.Smoke)MessageBox.Show(this,"桌面工作台启动失败："+e.Message,"Blitz Camera");host.Shutdown();}
       };
+    }
+    static object ShellMember(object value,string name,BindingFlags flags,params object[] args){
+      return value.GetType().InvokeMember(name,flags,null,value,args);
+    }
+    static string FolderKey(string directory){
+      return Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+    }
+    static IntPtr FindProjectFolderWindow(string directory){
+      object shell=null,windows=null;
+      try{
+        shell=Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application",true));
+        windows=ShellMember(shell,"Windows",BindingFlags.InvokeMethod);
+        int count=Convert.ToInt32(ShellMember(windows,"Count",BindingFlags.GetProperty));
+        for(int i=0;i<count;i++){
+          object window=null;
+          try{
+            window=ShellMember(windows,"Item",BindingFlags.InvokeMethod,i);
+            if(window==null)continue;
+            Uri location;
+            if(!Uri.TryCreate(Convert.ToString(ShellMember(window,"LocationURL",BindingFlags.GetProperty)),UriKind.Absolute,out location)||!location.IsFile)continue;
+            if(!String.Equals(FolderKey(location.LocalPath),FolderKey(directory),StringComparison.OrdinalIgnoreCase))continue;
+            var hwnd=new IntPtr(Convert.ToInt64(ShellMember(window,"HWND",BindingFlags.GetProperty)));
+            var name=new StringBuilder(64);Native.GetClassName(hwnd,name,name.Capacity);
+            if(name.ToString()=="CabinetWClass"||name.ToString()=="ExploreWClass")return hwnd;
+          }catch(COMException){}catch(TargetInvocationException){}catch(ArgumentException){}
+          finally{if(window!=null&&Marshal.IsComObject(window))Marshal.ReleaseComObject(window);}
+        }
+        return IntPtr.Zero;
+      }finally{
+        if(windows!=null&&Marshal.IsComObject(windows))Marshal.ReleaseComObject(windows);
+        if(shell!=null&&Marshal.IsComObject(shell))Marshal.ReleaseComObject(shell);
+      }
+    }
+    static IntPtr ForegroundRoot(){
+      IntPtr foreground=Native.GetForegroundWindow();
+      return foreground==IntPtr.Zero?IntPtr.Zero:Native.GetAncestor(foreground,2);
+    }
+    public async Task OpenProjectFolder(string directory){
+      if(String.IsNullOrWhiteSpace(directory)||!Path.IsPathRooted(directory)||!Directory.Exists(directory))
+        throw new InvalidOperationException("文件夹不存在或暂时无法访问。");
+      if(openingProjectFolder)throw new InvalidOperationException("正在打开文件夹，请稍候。");
+      directory=Path.GetFullPath(directory);
+      openingProjectFolder=true;
+      IntPtr owner=new WindowInteropHelper(this).Handle;
+      var report=new Dictionary<string,object>{{"time",DateTime.UtcNow.ToString("o")},{"directory",directory},{"host",typeof(Host).Assembly.Location},{"owner",owner.ToInt64()},{"foregroundBefore",ForegroundRoot().ToInt64()},{"success",false}};
+      try{
+        // The WebView may own the focused child. Keep foreground ownership in
+        // this UI process before handing the user's click to Explorer.
+        if(ForegroundRoot()==owner)Native.SetForegroundWindow(owner);
+        IntPtr target=FindProjectFolderWindow(directory);
+        report["reused"]=target!=IntPtr.Zero;
+        if(target==IntPtr.Zero){
+          uint shellPid;IntPtr shell=Native.GetShellWindow();
+          if(shell!=IntPtr.Zero&&Native.GetWindowThreadProcessId(shell,out shellPid)!=0)
+            Native.AllowSetForegroundWindow(shellPid);
+          using(var opened=Process.Start(new ProcessStartInfo{FileName=directory,Verb="open",UseShellExecute=true,WindowStyle=ProcessWindowStyle.Normal})){}
+          // ShellExecute can return before Explorer has registered its window.
+          for(int i=0;i<40&&target==IntPtr.Zero;i++){
+            await Task.Delay(150);target=FindProjectFolderWindow(directory);
+          }
+        }
+        report["target"]=target.ToInt64();
+        if(target==IntPtr.Zero)throw new InvalidOperationException("已请求打开文件夹，但未找到对应的资源管理器窗口，请重试。");
+        report["restored"]=Native.IsIconic(target);
+        for(int i=0;i<4;i++){
+          IntPtr foreground=ForegroundRoot();
+          if(foreground==target&&!Native.IsIconic(target)){report["success"]=true;return;}
+          // Do not keep pulling focus back if the user switches to another app.
+          if(foreground!=owner&&foreground!=target&&foreground!=IntPtr.Zero)break;
+          uint targetPid;
+          if(Native.GetWindowThreadProcessId(target,out targetPid)!=0)Native.AllowSetForegroundWindow(targetPid);
+          if(Native.IsIconic(target))Native.ShowWindowAsync(target,9); // SW_RESTORE
+          report["activationAccepted"]=Native.SetForegroundWindow(target);
+          await Task.Delay(100);
+        }
+        if(ForegroundRoot()!=target||Native.IsIconic(target))
+          throw new InvalidOperationException("文件夹已打开，但未能切到前台，请点击任务栏中的文件夹窗口。");
+        report["success"]=true;
+      }catch(Exception error){report["error"]=error.Message;throw;}
+      finally{
+        openingProjectFolder=false;report["foregroundAfter"]=ForegroundRoot().ToInt64();
+        try{File.WriteAllText(Path.Combine(host.Root,"output/project-folder-open.json"),Host.Json.Serialize(report));}catch{}
+      }
+    }
+    void ReplayDragOver(object sender,DragEventArgs e){
+      if(!e.Data.GetDataPresent(DataFormats.FileDrop))return;
+      e.Handled=true;e.Effects=Ready&&!closePending?e.AllowedEffects&DragDropEffects.Copy:DragDropEffects.None;
+      if(Ready)Send(new{type="replay-file-drag",phase="over"});
     }
     public void Send(object value){try{if(Web.CoreWebView2!=null)Web.CoreWebView2.PostWebMessageAsJson(Host.Json.Serialize(value));}catch{}}
     public async Task FlushEditorAsync(){

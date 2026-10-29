@@ -11,12 +11,14 @@ const out=path.resolve('output/settings-acceptance');fs.mkdirSync(out,{recursive
  try{
   await page.goto(base);await page.waitForFunction(()=>state.loaded&&state.samples.length>1);
   const original=await page.evaluate(()=>state.projectPath);
-  const sizes=await page.locator('#settingsButton,#openOverlay').evaluateAll(es=>es.map(e=>[e.getBoundingClientRect().width,e.getBoundingClientRect().height]));assert.deepEqual(sizes[0],sizes[1]);
+  assert.equal(await page.locator('#openOverlay').isVisible(),false);
+  assert.equal(await page.locator('#settingsButton').isVisible(),true);
   await page.evaluate(()=>{sequenceEditor.zoom(2);seek(3);sequenceEditor.edit(()=>sequenceEditor.doc.tracks.x[0].value+=7);});
   assert.equal(await page.evaluate(()=>state.tracks.x[0].value),7);assert.equal(await page.evaluate(()=>state.dirty),true);
   await page.locator('#settingsButton').click();await page.waitForFunction(()=>applicationSettings&&!settingsLoading);
   assert.equal(await page.locator('#settingsView').isVisible(),true);assert.equal(await page.locator('#wb').isVisible(),false);
   const defaults=await page.locator('#projectDirectory').inputValue();assert.equal(await page.locator('#settingsSave').isDisabled(),true);
+  assert.equal(await page.locator('#startupSoundSection').isVisible(),false);
   assert.equal(await page.locator('#battleStartMode').inputValue(),'auto');assert.equal((await settings()).replay_keyframe_start_seconds,null);
   assert.equal(await page.locator('#battleStartManual').isVisible(),false);
   await page.locator('#battleStartMode').selectOption('manual');assert.equal(await page.locator('#settingsSave').isEnabled(),true);
@@ -53,7 +55,7 @@ const out=path.resolve('output/settings-acceptance');fs.mkdirSync(out,{recursive
   assert.equal((await(await page.request.get(base+'/api/settings')).json()).project_directory,folder);
   await page.locator('#settingsBack').click();assert.equal(await page.locator('#homeView').isVisible(),true);
   await page.locator('#homeNew').click();await page.locator('#homeNewName').fill('设置验收项目');await page.locator('#homeNewName').press('Enter');
-  await page.waitForFunction(()=>!state.busy&&state.projectPath.endsWith('设置验收项目.json'));
+  await page.waitForFunction(()=>!state.busy&&state.projectPath.endsWith('设置验收项目.bcnproj'));
   assert.equal(path.dirname(await page.evaluate(()=>state.projectPath)),folder);
   await page.reload();await page.waitForFunction(()=>state.loaded);await page.locator('#settingsButton').click();await page.waitForFunction(()=>!settingsLoading);
   assert.equal(await page.locator('#projectDirectory').inputValue(),folder);

@@ -28,6 +28,8 @@ Thumbs.db
 *.pem
 *.key
 *.pfx
+*.dpapi
+*.bcsecret
 
 # Downloaded toolchains, dependency runtimes and generated desktop hosts.
 /tools/zig-*/
@@ -35,6 +37,7 @@ Thumbs.db
 /tools/*.zip
 /tools/*.nupkg
 /tools/overlay-runtime/
+/tools/installer-runtime/
 /blitzcam/preview_runtime/*
 !/blitzcam/preview_runtime/imagecodecs-provenance.json
 
@@ -60,6 +63,11 @@ Thumbs.db
 *.exp
 !/blitzcam/native/freecamera_switch_1121.fd4bfdb02ff2.dll
 !/blitzcam/native/position_hook_1121.c4b1cefb4342.dll
+!/blitzcam/native/position_hook_1121.5535bc201ad1.dll
 !/blitzcam/native/replay_seek_phase_trial_1121.427643ebb1e7.dll
 !/blitzcam/native/replay_seek_trial_1121.43fae9ec8448.dll
 !/blitzcam/native/replay_time_trial_1121.2fd8c56274dc.dll
+
+# Preserve the native files in the issued, frozen adapter source recipes.
+!/adapters/steam-international-11.21/source/native/*.dll
+!/adapters/steam-international-11.21-r2/source/native/*.dll

@@ -33,7 +33,7 @@
 - `python -X utf8 -B -m tools.test_keyframe_guard_app_ui`：比赛开始边界、旧点保留、赛前拖动拒绝和设置覆盖回归。
 - `python -X utf8 -B -m tools.test_overlay_ui`：原有七轨、框选、拖动、速度编辑、独立模式、保存重载和回放启动完整回归通过。
 
-结果及截图位于 `output/work-range-drag-acceptance` 和 `output/work-range-drag-app-acceptance`。全部使用独立合成数据，不连接游戏、不加载 Hook。
+结果及截图位于 `output/archive/2026-10-27/verification/work-range-drag-acceptance` 和 `output/archive/2026-10-27/verification/work-range-drag-app-acceptance`。全部使用独立合成数据，不连接游戏、不加载 Hook。
 
 补充验证：463 项原有及本轮测试通过，新增默认项目导入（普通比赛开始/接近全片结尾）服务测试通过；真实主页新建 → 预览导入 → 两端拖动 → 保存重载验收通过。单行底栏覆盖宽/窄窗口；复制粘贴与工作区拖动原有集成验收通过。
 
@@ -41,7 +41,7 @@
 
 默认或旧项目仍可能含赛前摄像机点。数值控件原来以最后一次成功值逐步累加，每次小幅调整仍落在赛前而被校验拒绝，导致时间始终弹回原值。现在时间数值控件的最小值直接使用当前比赛开始时刻，使旧点可拖入合法区间，合法点向前拖动也停在该边界。未识别开始时间时禁用时间调整并提示先手动设置；值、删除和模式一编辑行为保留。
 
-专项验收：`python -X utf8 -B -c "from tools.test_keyframe_guard_app_ui import main; main('test_keyframe_time_drag_app_ui.cjs')"`。修复前已复现默认 0 秒关键帧无法通过数值拖动移出赛前；修复后检查拖动中的实际数值、一次提交、精确输入、边界、轮询/自动保存和重载，均通过。报告在 `output/keyframe-time-drag-acceptance/result.json`。
+专项验收：`python -X utf8 -B -c "from tools.test_keyframe_guard_app_ui import main; main('test_keyframe_time_drag_app_ui.cjs')"`。修复前已复现默认 0 秒关键帧无法通过数值拖动移出赛前；修复后检查拖动中的实际数值、一次提交、精确输入、边界、轮询/自动保存和重载，均通过。报告在 `output/archive/2026-10-27/verification/keyframe-time-drag-acceptance/result.json`。
 
 `python -X utf8 -B -m tools.test_number_fields_ui` 普通数值、时间、速度、缓动、微调、双击输入、撤销/重做、取消、保存重载及悬浮窗完整回归通过。赛前边界组件验收同样通过。本轮未打包。
 
@@ -51,7 +51,7 @@
 
 另一处交错发生在上一笔自动保存返回时：关键帧直接拖动尚未松手，保存用的已提交快照仍等于旧值，不能据此将可见的新修改标为“已保存”。现在保存回执还检查编辑手势是否仍在进行，存在新修改时继续保留未保存状态，松手后再保存；自动保存请求期间的轮询等待该保存确定项目版本，防止把自身保存识别为外部变更。窗口状态保存也不携带尚未结束的编辑草稿。
 
-新增 tools/test_drag_autosave_app_ui.cjs，覆盖拖动保持超过 1.5 秒、松手不再点击后自动保存与轮询、数值/关键帧捕获丢失、旧保存回执在新拖动中返回、自身保存的轮询保护、一次撤销、Esc 取消与重载保留。修复前已复现数值从 21 秒退回 20.6 秒；修复后专项验收通过。报告：output/drag-autosave-acceptance/result.json。普通数值控件、赛前时间边界、入出点区间、速度关键帧拖动回归通过。本轮仅修改源码，未打包。
+新增 tools/test_drag_autosave_app_ui.cjs，覆盖拖动保持超过 1.5 秒、松手不再点击后自动保存与轮询、数值/关键帧捕获丢失、旧保存回执在新拖动中返回、自身保存的轮询保护、一次撤销、Esc 取消与重载保留。修复前已复现数值从 21 秒退回 20.6 秒；修复后专项验收通过。报告：output/archive/2026-10-27/verification/drag-autosave-acceptance/result.json。普通数值控件、赛前时间边界、入出点区间、速度关键帧拖动回归通过。本轮仅修改源码，未打包。
 
 ## 数值上下拖动（2026-10-23）
 

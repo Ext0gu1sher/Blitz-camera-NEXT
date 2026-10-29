@@ -1,4 +1,4 @@
-"""Parse synthetic WOW64 startup blocks; never open or read a live process."""
+"""Historical research diagnostics only; application replay recognition never uses argv."""
 from contextlib import contextmanager
 import ctypes as C
 import json
@@ -10,7 +10,6 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from blitzcam.replay_map import launch_arguments, launch_replay_path, replay_path_from_arguments
 from test_connection_diagnostics import namespace
 
 
@@ -64,17 +63,12 @@ class ReplayArgumentTests(unittest.TestCase):
 
     def test_unicode_quoted_file_survives_the_full_native_parse(self):
         args = [self.exe, self.replay, '--option', 'some value']
-        with fake_query():
-            self.assertEqual(launch_arguments(ArgumentMemory(args)), args)
-            self.assertEqual(launch_replay_path(ArgumentMemory(args)), Path(self.replay))
         report = self.report(args)
         self.assertEqual(report['state'], 'unique')
         self.assertEqual(report['replay_arguments'], [self.replay])
 
     def test_missing_file_is_distinct_from_an_unreadable_command_line(self):
         args = [self.exe, '--option', 'private-option-value']
-        with fake_query(), self.assertRaisesRegex(ValueError, '未包含回放文件'):
-            launch_replay_path(ArgumentMemory(args))
         report = self.report(args)
         self.assertEqual(report['state'], 'missing')
         self.assertEqual(report['argument_count'], 3)
@@ -83,7 +77,6 @@ class ReplayArgumentTests(unittest.TestCase):
 
     def test_duplicate_spelling_case_and_relative_segments_identify_one_file(self):
         args = [self.exe, self.replay, self.replay.upper(), r'C:\回放 项目\nested\..\shot A.wotbreplay']
-        self.assertEqual(replay_path_from_arguments(args), Path(self.replay))
         report = self.report(args)
         self.assertEqual(report['state'], 'unique')
         self.assertEqual(report['replay_argument_count'], 3)
@@ -91,40 +84,29 @@ class ReplayArgumentTests(unittest.TestCase):
 
     def test_distinct_files_never_fall_back_to_first_or_last(self):
         args = [self.exe, self.replay, r'C:\回放 项目\different.wotbreplay']
-        with fake_query(), self.assertRaisesRegex(ValueError, '2 个不同'):
-            launch_replay_path(ArgumentMemory(args))
         report = self.report(args)
         self.assertEqual(report['state'], 'ambiguous')
         self.assertEqual(report['distinct_replay_file_count'], 2)
 
     def test_executable_mismatch_is_not_a_missing_file(self):
         args = [r'D:\Other\wotblitz.exe', self.replay]
-        with fake_query(), self.assertRaisesRegex(ValueError, '身份不一致'):
-            launch_arguments(ArgumentMemory(args))
         report = self.report(args)
         self.assertEqual(report['state'], 'unavailable')
         self.assertIn('身份不一致', report['error']['message'])
 
-    def test_header_change_discards_both_reader_and_diagnostic_observations(self):
-        for reader in (launch_replay_path, namespace['inspect_startup_source']):
-            memory = ArgumentMemory([self.exe, self.replay])
-            memory.change_header = True
-            with self.subTest(reader=reader.__name__), fake_query():
-                if reader is launch_replay_path:
-                    with self.assertRaisesRegex(ValueError, '读取不一致'):
-                        reader(memory)
-                else:
-                    report = reader(memory)
-                    self.assertEqual(report['state'], 'unavailable')
-                    self.assertIn('读取不一致', report['error']['message'])
+    def test_header_change_discards_diagnostic_observation(self):
+        memory = ArgumentMemory([self.exe, self.replay])
+        memory.change_header = True
+        with fake_query():
+            report = namespace['inspect_startup_source'](memory)
+        self.assertEqual(report['state'], 'unavailable')
+        self.assertIn('读取不一致', report['error']['message'])
 
     def test_closed_or_invalid_handles_never_reach_a_native_api(self):
         for handle in (None, 0, -1, True, Mock()):
             memory = ArgumentMemory([self.exe, self.replay])
             memory.handle = handle
             with self.subTest(handle=handle), patch.object(C, 'WinDLL') as native:
-                with self.assertRaisesRegex(ValueError, '句柄不可用'):
-                    launch_arguments(memory)
                 report = namespace['inspect_startup_source'](memory)
                 self.assertEqual(report['state'], 'unavailable')
                 native.assert_not_called()

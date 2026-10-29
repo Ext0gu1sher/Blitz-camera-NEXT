@@ -28,6 +28,6 @@ tools/verify_replay_preview.py 使用隔离项目与隐藏浏览器，禁止游�
 
 tools/verify_desktop_package.py --preview-replay 在独立中文和空格目录解压，以便携 Python 和隐藏原生 WebView2 检查压缩贴图、回放场景、回拖、导出及退出。自动检查证明执行和数据链路，游戏与预览的视觉/时间对应仍需人工核对。
 
-2026-10-21 验证结果：245 项 Python 测试通过；原有属性编辑/选择/拖动/撤销/模式隔离/回放打开的隐藏 UI 回归通过；真实 canal→plant 换图、前后拖动、变速联动、七轨记录及相机求值一致性通过，未调用游戏控制接口。最终便携包隐藏 WebView2 独立运行通过，压缩贴图解码、原生导出、重复启动复用和关闭服务通过。记录位于 output/replay-preview-090-acceptance/result.json 及 output/desktop-preview-090-acceptance/result.json。
+2026-10-21 验证结果：245 项 Python 测试通过；原有属性编辑/选择/拖动/撤销/模式隔离/回放打开的隐藏 UI 回归通过；真实 canal→plant 换图、前后拖动、变速联动、七轨记录及相机求值一致性通过，未调用游戏控制接口。最终便携包隐藏 WebView2 独立运行通过，压缩贴图解码、原生导出、重复启动复用和关闭服务通过。记录位于 output/archive/2026-10-27/verification/replay-preview-090-acceptance/result.json 及 output/archive/2026-10-27/verification/desktop-preview-090-acceptance/result.json。
 
 最终 ZIP SHA-256：70f3528914b9b9f90fce8a270d9fb29b8fc901db9043420c19bc7c10fefa290f。用户原项目 SHA-256 保持 0ba30a657c549c502866b852594ed5c3ec084955af3c4b1ad06874a04853326a；游戏 Hook 未更改。

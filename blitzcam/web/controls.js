@@ -43,7 +43,7 @@
     const h=C.hint;
     const speeds=Array.from({length:9},(_,i)=>h('speed'+(i+1))),speedHint=speeds.every((key,i)=>key===String(i+1))?'1–9':speeds.join('/');
     const lines=[`${h('forward')}/${h('backward')}/${h('left')}/${h('right')} 移动 · ${h('up')}/${h('down')} 升降 · ${speedHint} 调速 · 滚轮缩放`,
-      `空格 播放/暂停 · ${h('seekBack')}/${h('seekForward')} 长按加速 · ${h('rear')} 回到主角后方`,
+      `空格 播放/暂停 · ${h('seekBack')}/${h('seekForward')} 长按加速 · ${h('rear')} 回到主角后方（按住跟随）`,
       `${h('rollLeft')}/${h('rollRight')} 逆/顺时针横滚 · ${[C.key('exitFlightMouse'),C.key('exitFlight')].filter(Boolean).map(C.label).concat('Esc').join(' / ')} 退出`];
     document.querySelectorAll('[data-flight-hint]').forEach((el,i)=>el.textContent=lines[i]);
     const fly=document.getElementById('previewFly');if(fly)fly.title=`自由飞行（${h('enterFlight')}） · ${lines.join(' · ')} · 调速：${Array.from({length:9},(_,i)=>h('speed'+(i+1))).join(' / ')}`;

@@ -4,6 +4,7 @@ Native WebView2 renders offscreen with no focus, hotkeys, tray, game discovery,
 camera connection, Hook execution or external browser launch.
 """
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -13,17 +14,52 @@ import sys
 import zipfile
 import tempfile
 import time
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-def main():
+def activate_test_pro(master, app, profile, cleanup):
+    """Issue to a disposable software key, leaving the user's activation alone."""
+    from blitzcam import package_crypto as crypto
+    from blitzcam.deployment import Deployment
+    from blitzcam.offline_updater import write_json
+    from blitzcam.packages import digest
+    from publisher.issuance import issue
+    from publisher.master import read_master
+    name = 'BlitzCamera-Package-Test-' + uuid4().hex
+    provider = 'Microsoft Software Key Storage Provider'
+    public = crypto.device_public(name, provider, create=True)
+    def delete_key():
+        with crypto.device_key(name, provider) as (dll, key):
+            crypto._check(crypto._fn(dll, 'NCryptDeleteKey', [crypto.HANDLE, crypto.U32])(key, 0), '清理测试密钥')
+            key.value = 0
+    cleanup.callback(delete_key)
+    write_json(profile/'device.json', {'key_name':name, 'provider':provider, 'device':digest(public)})
+    deployment = Deployment(app/'output', root=app, profile_root=profile,
+                            trust=app/'app/blitzcam/package-trust.json')
+    config = profile/'test.bcconfig'
+    deployment.export_config(config)
+    batch = issue(master, [config], profile/'test-issuance', ROOT/'output/publisher/publisher.dpapi', deployment.trust)
+    package = Path(batch['directory'])/batch['recipients'][0]['filename']
+    deployment.install(deployment.inspect(package)['token'])
+    fresh = Deployment(app/'output', root=app, profile_root=profile, trust=deployment.trust)
+    manifest, expected, _ = read_master(master)
+    assert fresh.enabled and fresh.files == expected
+    return {'master_id':manifest['master_id'], 'version':manifest['release']['version'],
+            'isolated_device_encryption_verified':True, 'all_adapter_files_verified':True}
+
+
+def main(cleanup):
     parser = argparse.ArgumentParser()
     parser.add_argument('archive', type=Path)
     parser.add_argument('--preview-replay', type=Path)
     parser.add_argument('--overlay-visibility', action='store_true')
+    parser.add_argument('--pro-master', type=Path, help='Activate this master using a disposable test device')
     args = parser.parse_args()
+    if args.overlay_visibility and not args.pro_master:
+        parser.error('--overlay-visibility requires --pro-master because overlays are a Pro feature')
     tag=args.archive.stem.removeprefix('BlitzCamera-').replace('.','')
     report_root = ROOT/'output'/f'desktop-{tag}-acceptance'
     report_root.mkdir(exist_ok=True)
@@ -40,7 +76,7 @@ def main():
     for name, expected in manifest['files'].items():
         if hashlib.sha256((app/name).read_bytes()).hexdigest() != expected:
             raise AssertionError('Changed package file: '+name)
-    env = dict(os.environ, BLITZCAM_DATA_ROOT=str(app), BLITZCAM_DESKTOP_SMOKE='1')
+    env = dict(os.environ, BLITZCAM_DATA_ROOT=str(app), BLITZCAM_DESKTOP_SMOKE='1', BLITZCAM_PROFILE_ROOT=str(relocated/'account'))
     # Releases need not contain a seed project. Create a fixture only inside
     # the isolated extraction so both ordinary and preview smoke tests work.
     fixture = app/'output/project.json'
@@ -61,18 +97,34 @@ def main():
               'keyframes':[{'time_sec':t,'position':p,'quaternion':list(quaternion_from_angles(a,-10,0)),'horizontal_fov_deg':z}for t,p,a,z in [(40,[150,100,60],-130,70),(80,[-20,30,50],-90,50)]]}
         (app/'output/project.json').write_text(json.dumps(validate_project(data).to_dict()),encoding='utf-8')
     original = ROOT/'output/project.json'
-    before = hashlib.sha256(original.read_bytes()).hexdigest()
+    before = hashlib.sha256(original.read_bytes()).hexdigest() if original.exists() else None
     probe = subprocess.run([str(app/'runtime/python.exe'), '-B', '-c',
-        "import json,sys,hashlib;from blitzcam.project import read_project;from blitzcam.channels import track_controls;"
-        "from blitzcam.playback import compile_positions,NATIVE;from blitzcam.paths import OUTPUT;"
-        "p=read_project(OUTPUT/'project.json');m=json.loads((NATIVE/'position_hook_1121.json').read_text());"
-        "assert hashlib.sha256((NATIVE/m['dll']).read_bytes()).hexdigest()==m['sha256'];"
-        "rows=compile_positions(p);print(json.dumps({'sys_path':sys.path,'version':sys.version,'channels':list(track_controls(p)),"
-        "'compiled_pose_points':len(rows),'dll_verified':True}))"],
+        "import json,sys,importlib.util;from pathlib import Path;from blitzcam.project import read_project;from blitzcam.channels import track_controls;"
+        "from blitzcam.paths import OUTPUT;from blitzcam.deployment import Deployment;"
+        "p=read_project(OUTPUT/'project.json');d=Deployment(OUTPUT);"
+        "assert not d.enabled;assert importlib.util.find_spec('blitzcam.playback') is None;"
+        "assert not list((Path(sys.modules['blitzcam'].__file__).parent/'native').glob('*.dll'));"
+        "print(json.dumps({'sys_path':sys.path,'version':sys.version,'channels':list(track_controls(p)),"
+        "'public_package_has_no_hook':True,'edition':d.status()['edition']}))"],
         cwd=relocated, env=env, capture_output=True, text=True, encoding='utf-8', timeout=15)
     if probe.returncode:
         raise AssertionError(probe.stderr)
     probe_result = json.loads(probe.stdout)
+    pro_result = None
+    if args.pro_master:
+        pro_result = activate_test_pro(args.pro_master, app, relocated/'account', cleanup)
+        adapter = subprocess.run([str(app/'runtime/python.exe'), '-B', '-c',
+            "from pathlib import Path;from blitzcam.paths import OUTPUT;"
+            "from blitzcam.deployment import Deployment;from blitzcam.device_store import shared_profile_root;"
+            "from blitzcam.game_backend import GameBackend;from blitzcam.speed import MAX_SHOOTING_SECONDS;"
+            "d=Deployment(OUTPUT,profile_root=shared_profile_root());assert d.enabled;"
+            "b=GameBackend(d);assert b.module('reader').CameraSession;"
+            "assert b.module('playback').PositionPlayback;assert MAX_SHOOTING_SECONDS==1920;"
+            "print(d.manifest['version'])"], cwd=relocated, env=env,
+            capture_output=True, text=True, encoding='utf-8', timeout=20)
+        if adapter.returncode: raise AssertionError(adapter.stderr)
+        assert adapter.stdout.strip() == pro_result['version']
+        pro_result['bundled_runtime_imports_verified'] = True
     if args.preview_replay:
         codec = subprocess.run([str(app/'runtime/python.exe'),'-B','-c',
             # The pinned codec requires input >128 bytes. Use a real 32x32
@@ -81,7 +133,7 @@ def main():
             "a=imagecodecs.bcn_decode(bytes.fromhex('00f8000000000000')*64,1,shape=(32,32,4));"
             "assert a.shape==(32,32,4) and (a==[255,0,0,255]).all()"],cwd=relocated,env=env,capture_output=True,text=True,timeout=15)
         if codec.returncode:raise AssertionError(codec.stderr)
-    print('Portable runtime and full-pose compile passed', flush=True)
+    print('Portable runtime and public package isolation passed', flush=True)
     service = subprocess.Popen([str(app/'BlitzCamera.exe')], cwd=relocated, env=env,
                                creationflags=subprocess.CREATE_NO_WINDOW)
     state_file = app/'output/workstation-service.json'
@@ -141,7 +193,8 @@ def main():
         pass
     else:
         raise AssertionError('Backend remained active after desktop closed')
-    if hashlib.sha256(original.read_bytes()).hexdigest() != before:
+    after = hashlib.sha256(original.read_bytes()).hexdigest() if original.exists() else None
+    if after != before:
         raise AssertionError('Original project changed')
     report = {'package':str(args.archive.resolve()), 'package_sha256':hashlib.sha256(args.archive.read_bytes()).hexdigest(),
               'version':manifest['version'], 'runtime_probe':probe_result,
@@ -149,6 +202,7 @@ def main():
               'startup_home_without_project':True, 'application_version_verified':True,
               'backend_exited':True, 'source_project_unchanged':before,
               'relocated_directory':str(app), 'scope':'offscreen native desktop; no game access or Hook execution'}
+    if pro_result: report['pro_adapter'] = pro_result
     if args.overlay_visibility:
         overlay=json.loads((app/'output/desktop-overlay-smoke.json').read_text(encoding='utf-8-sig'))
         if not all(overlay[k] for k in ('hidePreservedWorkbench','revealPassed','collapsePassed','positiveCaptureSize')) or overlay['cycles']<3:raise AssertionError(overlay)
@@ -164,4 +218,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    with ExitStack() as cleanup:
+        main(cleanup)

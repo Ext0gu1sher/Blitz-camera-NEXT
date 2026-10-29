@@ -21,6 +21,7 @@ class BuildProfile:
     replay_file_source_offset: int | None = None
     replay_file_holder_vft: int | None = None
     replay_file_vft: int | None = None
+    replay_file_pointer_holder_vft: int | None = None
 
 
 VFT_PREFERRED = {
@@ -57,6 +58,7 @@ PROFILE_1121 = BuildProfile(
     replay_file_source_offset=0xE8,
     replay_file_holder_vft=0x37BD758,
     replay_file_vft=0x37C1CAC,
+    replay_file_pointer_holder_vft=0x383E4F8,
 )
 PROFILES = MappingProxyType({p.sha256: p for p in (PROFILE, PROFILE_1121)})
 

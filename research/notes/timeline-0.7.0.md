@@ -21,10 +21,10 @@
 - 悬浮窗采用实际对局时间，禁用旧全轨迹比例重定时，保留主工作台区间。
 - 208 项 Python 测试通过，覆盖绝对时间持久化、全片边界、实际时间捕获、窗口全局求值和原生表时间、错误区间、曲线起点与只读文件元数据。
 - 页面验收通过：真实鼠标事件测试 Alt 滚轮、双向左键框选、Shift 追加、6 键拖动、变速不移动摄像机键、空白处预演不跳转游戏、读取文件、保存重载、区间播放。使用合成回放和假的播放执行器，没有操作实际游戏。
-- 截图与结果：`output/timeline-070-acceptance/`、`output/timeline-070-regression/`。
+- 截图与结果：`output/archive/2026-10-27/verification/timeline-070-acceptance/`、`output/archive/2026-10-27/verification/timeline-070-regression/`。
 - 本轮没有启动真实游戏运镜、写内存或注入；新绝对时间联动尚待实机画面验收。
-- 原工程备份：`output/project-before-timeline-070.json`，SHA-256 `539431cd91e791a1948350a56f37978858afef160717fd0ee5a8e075900f998e`；部署不迁移或覆盖用户工程。
-- 已部署到 `http://127.0.0.1:56593/`，服务 PID 65604、悬浮窗 PID 49528，四个面板就绪。生产服务用用户真实机位副本在离线草稿中平移到 100–110 秒求值，601 个样本和首机位正确，工程哈希/版本不变，未启动实机播放。记录：`output/timeline-070-live-readonly-smoke.json`。
+- 原工程备份：`output/archive/2026-10-27/backups/project-before-timeline-070.json`，SHA-256 `539431cd91e791a1948350a56f37978858afef160717fd0ee5a8e075900f998e`；部署不迁移或覆盖用户工程。
+- 已部署到 `http://127.0.0.1:56593/`，服务 PID 65604、悬浮窗 PID 49528，四个面板就绪。生产服务用用户真实机位副本在离线草稿中平移到 100–110 秒求值，601 个样本和首机位正确，工程哈希/版本不变，未启动实机播放。记录：`output/archive/2026-10-27/research/timeline-070-live-readonly-smoke.json`。
 
 ## 交互依据
 

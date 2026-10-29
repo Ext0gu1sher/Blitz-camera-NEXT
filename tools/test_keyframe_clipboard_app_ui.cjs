@@ -41,6 +41,8 @@ const out=path.resolve('output/keyframe-clipboard-app-acceptance');fs.mkdirSync(
   await page.keyboard.press('Control+z');assert.deepEqual((await read()).data,rateBefore.data);checks.push('speed-pane clipboard scope and mixed rate/camera replay times');
   // Copy a camera point, switch to a real second project, and paste from the retained memory.
   await selected([['x',10]]);await page.locator('[data-action=copy]').click();const onePoint=(await read()).clipboard;await save();
+  const targetDirectory=(await page.evaluate(()=>api('/api/settings'))).project_directory;
+  assert.equal(path.dirname(path.resolve(targetDirectory)),path.dirname(path.resolve(sourcePath)),'new project directory must be isolated beside the source fixture');
   const target=await page.evaluate(async()=>{const result=await api('/api/projects/new',{name:'Clipboard target'});await refreshState(true);return result.path;});assert.notEqual(target,sourcePath);assert.equal((await read()).clipboard,onePoint);
   await page.evaluate(()=>seek(2));await page.locator('[data-action=paste]').click();const targetData=await read();assert.equal(at(targetData.data,'x',2).value,at(source.data,'x',10).value);assert.deepEqual(at(targetData.data,'x',2).ease,[.2,.1,.8,.9]);assert.equal(targetData.selected.length,1);await save();
   await page.evaluate(async sourcePath=>{await api('/api/projects/open',{path:sourcePath});await refreshState(true);},sourcePath);assert.equal((await read()).clipboard,onePoint);checks.push('toolbar copy and paste across real projects');

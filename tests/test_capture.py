@@ -11,7 +11,8 @@ import urllib.error
 import urllib.request
 
 from blitzcam.project import validate_project
-from blitzcam.server import Workstation, make_handler
+from blitzcam.server import make_handler
+from tests.fixtures.game_workstation import Workstation
 
 
 class CaptureTests(unittest.TestCase):

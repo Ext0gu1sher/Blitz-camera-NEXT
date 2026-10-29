@@ -284,7 +284,9 @@ class PositionPlayback:
                 if code:raise CameraError(f'Hook 拒绝当前状态（{code}）。')
                 report['hooks_detached']=False;self.update(hooks_detached=False,message='正在确认相机更新与绘制…')
                 begin=time.monotonic();armed=False;stop_sent=False;event_file=(run/'events.jsonl').open('w',encoding='utf8')
-                while time.monotonic()-begin<(600 if controlled else duration+cfg.approach_seconds+12):
+                # Slow motion uses the same bounded path table for longer.
+                # Keep the live heartbeat/cancel guards and allow its real duration.
+                while time.monotonic()-begin<(max(600,play_seconds+cfg.approach_seconds+12) if controlled else duration+cfg.approach_seconds+12):
                     driver.write(g+HEADER+Header.heartbeat.offset,struct.pack('<I',driver.k.GetTickCount()&0xffffffff),'owned watchdog')
                     h=Header.from_buffer_copy(s.memory.read(g+HEADER,C.sizeof(Header)))
                     # Snapshot committed ring entries before slots can wrap.

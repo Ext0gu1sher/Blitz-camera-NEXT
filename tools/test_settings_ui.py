@@ -16,6 +16,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def main():
     with tempfile.TemporaryDirectory(dir=ROOT/'output') as tmp,patch('blitzcam.server.OUTPUT',Path(tmp)), \
+         patch.dict(os.environ,{'BLITZCAM_PROFILE_ROOT':str(Path(tmp)/'account')}), \
          patch('blitzcam.settings.documents_directory',return_value=Path(tmp)/'Documents'):
         app=Workstation(Path(tmp)/'original.json');app.stop.set();app.poller.join()
         app.set_project(validate_project({'shooting_mode':'camera_only','keyframes':[
@@ -27,7 +28,7 @@ def main():
         try:
             with patch('blitzcam.replay_launcher.choose_directory',side_effect=[None,folder]),patch('blitzcam.server.CameraSession.connect',side_effect=AssertionError('settings accessed game')):
                 subprocess.run(['node',str(ROOT/'tools/test_settings_ui.cjs'),f'http://127.0.0.1:{server.server_address[1]}',str(folder.resolve())],cwd=ROOT,env=env,check=True)
-            assert (folder/'设置验收项目.json').is_file()
+            assert (folder/'设置验收项目.bcnproj').is_file()
         finally:
             server.shutdown();server.server_close();thread.join();app.close()
 

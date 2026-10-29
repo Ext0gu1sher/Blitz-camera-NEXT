@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+import zipfile
 import urllib.error
 import urllib.request
 from unittest.mock import patch
@@ -42,6 +43,7 @@ class ProjectFileTests(unittest.TestCase):
         result = self.request('/api/projects/new', {'name': '航拍 项目'})
         path = Path(result['path'])
         self.assertTrue(path.is_file())
+        self.assertEqual(path.suffix, '.bcnproj')
         self.assertEqual(path.parent, self.documents/'Blitz-Camera-Project')
         state = self.request('/api/state')
         self.assertEqual(state['project_path'], str(path.resolve()))
@@ -71,6 +73,56 @@ class ProjectFileTests(unittest.TestCase):
         entry = next(e for e in listing if e['path'] == str(path.resolve()))
         self.assertFalse(entry['exists'])
         self.assertEqual(entry['name'], 'gone')
+
+    def test_bcn_autosave_reopen_discovery_and_save_as(self):
+        from blitzcam.project import read_project
+        path = Path(self.request('/api/projects/new', {'name': '专有项目'})['path'])
+        self.app.set_project(self.app.project)
+        self.assertEqual(json.loads(path.read_text(encoding='utf-8'))['format_version'], 1)
+        expected = self.app.project.to_dict()
+        self.request('/api/projects/open', {'path': str(path)})
+        self.assertEqual(self.app.project.to_dict(), expected)
+        other = path.with_name('复制.bcnproj');other.write_bytes(path.read_bytes())
+        listing = self.request('/api/projects/recent')['projects']
+        self.assertIn(str(other), [item['path'] for item in listing])
+        item = next(item for item in listing if item['path'] == str(path))
+        self.assertGreater(item['keyframes'], 0)
+        saved = Path(self.app.save_project_as(self.out/'没有扩展名'))
+        self.assertEqual(saved.suffix, '.bcnproj')
+        self.assertEqual(read_project(saved).to_dict(), expected)
+
+    def test_conversion_available_from_home_and_leaves_active_project(self):
+        from blitzcam.project import write_project, read_project
+        source, target = self.out/'legacy.json', self.out/'converted.bcnproj'
+        write_project(source, self.app.project)
+        original = source.read_bytes()
+        active = self.app.project_path
+        result = self.request('/api/projects/convert', {'source': str(source), 'destination': str(target), 'format': '.bcnproj'})
+        self.assertEqual(result['path'], str(target.resolve()))
+        self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(self.app.project_path, active)
+        self.assertEqual(read_project(target).to_dict(), self.app.project.to_dict())
+        with self.assertRaises(urllib.error.HTTPError):
+            self.request('/api/projects/convert', {'source': str(source), 'destination': str(target), 'format': '.bcnproj'})
+        self.app.project = self.app.project_path = None
+        with patch('blitzcam.replay_launcher.choose_project', return_value=None):
+            self.assertEqual(self.request('/api/projects/convert', {'format': '.bcnproj'}), {'cancelled': True})
+        with patch('blitzcam.replay_launcher.choose_project', return_value=target), patch('blitzcam.replay_launcher.save_project', return_value=None):
+            self.assertEqual(self.request('/api/projects/convert', {'format': '.json'}), {'cancelled': True})
+
+    def test_desktop_open_waits_for_editor_and_acknowledges_only_matching_request(self):
+        from blitzcam.project import write_project
+        target = self.out/'双击项目.bcnproj';write_project(target, self.app.project)
+        original = self.app.project_path
+        with patch('blitzcam.desktop.open_overlay'):
+            self.request('/api/desktop/project', {'path': str(target)})
+        pending = self.request('/api/state')['desktop_project_request']
+        self.assertEqual(pending['path'], str(target.resolve()))
+        self.assertEqual(self.app.project_path, original)
+        self.request('/api/desktop/project/ack', {'id': 'wrong'})
+        self.assertIsNotNone(self.app.desktop_project_request)
+        self.request('/api/desktop/project/ack', {'id': pending['id']})
+        self.assertIsNone(self.app.desktop_project_request)
 
     def test_discovers_projects_without_opening_or_recording_them(self):
         folder = (self.out/'项目库').resolve()
@@ -223,12 +275,29 @@ class ProjectFileTests(unittest.TestCase):
         before=set(self.out.rglob('*'))
         self.assertIsNone(self.request('/api/state')['project'])
         self.assertIsNone(self.request('/api/state')['project_path'])
-        for endpoint in ('/api/project/edit','/api/ui/editor','/api/capture/hotkey','/api/replay/select','/api/sample'):
+        for endpoint in ('/api/project/edit','/api/ui/editor','/api/capture/hotkey','/api/sample'):
             with self.subTest(endpoint=endpoint),self.assertRaises(urllib.error.HTTPError):self.request(endpoint,{})
+        with patch('blitzcam.replay_launcher.choose_replay',return_value=None):
+            self.assertEqual(self.request('/api/replay/select',{}),{'cancelled':True})
         self.assertEqual(set(self.out.rglob('*')),before)
         created=self.request('/api/projects/new',{'name':'手动新建'})
         self.assertTrue(Path(created['path']).is_file())
         self.assertEqual(Path(created['path']).parent,self.documents/'Blitz-Camera-Project')
+
+    def test_home_can_validate_replay_before_creating_project(self):
+        self.app.close();self.app.project=None;self.app.project_path=None;self.app.editor_state=None
+        replay=self.out/'拖入 回放.WOTBREPLAY'
+        with zipfile.ZipFile(replay,'w') as archive:
+            archive.writestr('meta.json',json.dumps({'battleDuration':100,'version':'11.21'}))
+        before=set(self.out.rglob('*'))
+        with patch('blitzcam.replay_launcher.choose_replay',return_value=replay), \
+             patch.object(self.app,'open_replay',side_effect=AssertionError('game launch')):
+            chosen=self.request('/api/replay/select',{})['info']
+            dropped=self.request('/api/replay/timeline',{'path':str(replay)})
+        self.assertEqual(chosen,dropped)
+        self.assertEqual(dropped['replay_file'],str(replay.resolve()))
+        self.assertIsNone(self.request('/api/state')['project'])
+        self.assertEqual(set(self.out.rglob('*')),before)
 
 
 class DesktopReuseTests(unittest.TestCase):

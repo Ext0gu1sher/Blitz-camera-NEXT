@@ -10,6 +10,6 @@ Python、浏览器和原生时钟统一通过二分反解三次曲线的横坐�
 
 撤销快捷键现在先于按钮和下拉框过滤处理。速度数值输入提交后同样可撤销；其他文本输入保留文本撤销。撤销、重做尽量保留仍存在的选中点。
 
-验证覆盖 287 项 Python 测试，原生独立进程的贝塞尔完整播放与工作区切片，以及 tools.test_speed_editor_ui、tools.test_speed_window_ui、tools.test_overlay_ui。直接编辑验证包含响应式布局、Ctrl 加点、精确补点、拖动撤销、输入和下拉框撤销、手柄、取消、工作区和保存重开。截图位于 output/speed-editor-acceptance。
+验证覆盖 287 项 Python 测试，原生独立进程的贝塞尔完整播放与工作区切片，以及 tools.test_speed_editor_ui、tools.test_speed_window_ui、tools.test_overlay_ui。直接编辑验证包含响应式布局、Ctrl 加点、精确补点、拖动撤销、输入和下拉框撤销、手柄、取消、工作区和保存重开。截图位于 output/archive/2026-10-27/verification/speed-editor-acceptance。
 
 测试使用隔离项目、模拟回放和本地无头浏览器，没有操作用户的游戏。更新后需重启工作台和本地服务。

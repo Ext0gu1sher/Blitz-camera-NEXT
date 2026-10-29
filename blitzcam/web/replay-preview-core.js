@@ -86,6 +86,24 @@ export function cameraBehindVehicle(pose){
     yaw:90-pose.yaw*180/Math.PI,pitch:-10,roll:0,zoom:54};
 }
 
+// Accumulate rendered travel over a short window so extra renders in the same
+// frame do not overwrite the speed. Call reset for seeks and camera cuts.
+export class CameraMotionMeter {
+  constructor(){this.reset();}
+  reset(){this.previous=null;this.started=0;this.distance=0;this.speed=0;}
+  sample(position,now){
+    if(!Array.isArray(position)||position.length!==3||!position.every(Number.isFinite)||!Number.isFinite(now)){this.reset();return 0;}
+    if(!this.previous||now<this.previous.now||now-this.previous.now>500){
+      this.reset();this.started=now;
+    }else this.distance+=Math.hypot(...position.map((v,i)=>v-this.previous.position[i]));
+    this.previous={position:[...position],now};
+    if(now-this.started>=100){
+      this.speed=this.distance*1000/(now-this.started);this.distance=0;this.started=now;
+    }
+    return this.speed;
+  }
+}
+
 // Integrated replay seconds for a held arrow key. The initial single-frame tap
 // is separate. After a short tap window, ramp smoothly from 1x to 64x in 3 s.
 // Integrating the curve makes travel independent of key-repeat/display rates.

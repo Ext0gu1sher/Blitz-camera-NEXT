@@ -8,9 +8,6 @@ from pathlib import Path
 import re
 import struct
 
-from .profile import BuildProfile
-
-
 @dataclass(frozen=True)
 class ReplaySource:
     path: Path
@@ -25,7 +22,10 @@ class ReplaySource:
 
 def supports_runtime_source(session):
     profile = getattr(session, 'profile', None)
-    return isinstance(profile, BuildProfile) and profile.replay_file_source_offset is not None
+    # Authenticated adapters define BuildProfile inside their own namespace.
+    # Capability depends on the selected layout, not Python class identity.
+    # The reader still verifies the exact executable, object types and links.
+    return getattr(profile, 'replay_file_source_offset', None) is not None
 
 
 def _string(memory, address, limit):
@@ -50,6 +50,30 @@ def _string(memory, address, limit):
     return data[:-1].decode('utf-8')
 
 
+def _owner_type(session, source, holder):
+    """Verify either exact-build shared owner, including the owned file link."""
+    if not (0x10000 <= holder <= 0xFFFFFFF0 and
+            0x10000 <= source <= 0xFFFFFFAF):
+        raise ValueError('当前回放文件的持有关系无效。')
+    memory, profile = session.memory, session.profile
+    kind, strong, weak = struct.unpack('<III', memory.read(holder, 12))
+    if not (0 < strong <= 0x7FFFFFFF and 0 < weak <= 0x7FFFFFFF):
+        raise ValueError('当前回放文件的持有关系无效。')
+    if kind == session.live(profile.replay_file_holder_vft):
+        # std::_Ref_count_obj2<NewReplayFile>: make_shared inline storage.
+        owned = holder + 12
+    elif (profile.replay_file_pointer_holder_vft is not None and
+          kind == session.live(profile.replay_file_pointer_holder_vft)):
+        # std::_Ref_count_resource<NewReplayFile*, default_delete<...>>:
+        # the resource is separately allocated; +0xC is its owning pointer.
+        owned = memory.u32(holder + 12)
+    else:
+        raise ValueError('当前回放文件的对象类型未匹配。')
+    if owned != source:
+        raise ValueError('当前回放文件的持有关系无效。')
+    return kind
+
+
 def runtime_replay_source(session):
     if not supports_runtime_source(session):
         raise ValueError('当前构建尚未适配游戏内回放文件读取。')
@@ -58,11 +82,7 @@ def runtime_replay_source(session):
     pair_address = player + profile.replay_file_source_offset
     pair = memory.read(pair_address, 8)
     source, holder = struct.unpack('<II', pair)
-    if not 0x10000 <= holder <= 0xFFFFFFF0 or source != holder + 12:
-        raise ValueError('当前回放文件的持有关系无效。')
-    holder_type = session.live(profile.replay_file_holder_vft)
-    if memory.u32(holder) != holder_type:
-        raise ValueError('当前回放文件的对象类型未匹配。')
+    holder_type = _owner_type(session, source, holder)
     header = memory.read(source, 0x50)
     metadata = struct.unpack_from('<I', header, 0x4C)[0]
     file_type = session.live(profile.replay_file_vft)
@@ -71,7 +91,7 @@ def runtime_replay_source(session):
     path = Path(_string(memory, source, 32768))
     if not path.is_absolute() or path.suffix.lower() != '.wotbreplay' or any(ord(c) < 32 for c in str(path)):
         raise ValueError('游戏当前回放文件的路径无效。')
-    # The embedded owner keeps the running client's build tag while the archive
+    # NewReplayFile keeps the running client's build tag while the archive
     # object records the file's own version. Cross-region or older replays (for
     # example a "11.21.0_china" file on a 11.21.0 client) legitimately differ;
     # only the archive key must agree between the two objects.
@@ -83,7 +103,7 @@ def runtime_replay_source(session):
         raise ValueError('当前回放文件的信息与播放对象不一致。')
     session._guard()
     if (memory.read(pair_address, 8) != pair or memory.read(source, 0x50) != header or
-            memory.u32(holder) != holder_type or memory.u32(metadata) != file_type or
+            _owner_type(session, source, holder) != holder_type or memory.u32(metadata) != file_type or
             memory.u32(player + 0xA0) != metadata):
         raise ValueError('游戏正在切换回放文件，请稳定后重新连接。')
     return ReplaySource(path.resolve(), player, source, holder, metadata, version, key, client_version)

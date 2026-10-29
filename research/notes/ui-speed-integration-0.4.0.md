@@ -15,7 +15,7 @@
 
 ## 自测证据
 
-原始报告与事件在 `output/playback-runs/<UTC>/`。汇总为 `output/ui-speed-040-acceptance/audit.json` 和 `result.json`。用户四机位项目先备份，临时缩放测试后已恢复；机位、姿态、FOV 和相对时间保留。
+原始报告与事件在 `output/playback-runs/<UTC>/`。汇总为 `output/archive/2026-10-27/verification/ui-speed-040-acceptance/audit.json` 和 `result.json`。用户四机位项目先备份，临时缩放测试后已恢复；机位、姿态、FOV 和相对时间保留。
 
 | 运行目录 | 测试 | 结果 |
 | --- | --- | --- |
@@ -47,4 +47,4 @@
 
 驻留代码核对和共享块写入边界生效后，直接从页面再次执行完整四机位曲线。运行 `20261019T144017515765Z`：拍摄 10.029199 秒、战斗推进 4.404243 秒；Scene 倍率逐样本一致，位置终点误差 0.0，朝向误差 0.000032756°，FOV 误差 0.000004040°。入口全解除、原倍率恢复、暂停已确认。
 
-最终审计 `output/ui-speed-040-acceptance/final-audit.json`；实际页面截图 `speed-ui.jpg`，浏览器错误日志为空。原四个机位的时间、坐标和 FOV 保留，四元数仅允许角度换算的数值舍入；最终页面保留正常→慢放→正常曲线及拍摄时间模式。
+最终审计 `output/archive/2026-10-27/verification/ui-speed-040-acceptance/final-audit.json`；实际页面截图 `speed-ui.jpg`，浏览器错误日志为空。原四个机位的时间、坐标和 FOV 保留，四元数仅允许角度换算的数值舍入；最终页面保留正常→慢放→正常曲线及拍摄时间模式。

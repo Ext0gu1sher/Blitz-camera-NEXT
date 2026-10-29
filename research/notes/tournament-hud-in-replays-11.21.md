@@ -79,7 +79,7 @@ EXE 内 protobuf 描述符明确声明：
 
 ## 可复查材料
 
-原始调查输出在 `output/observer-replay-research/`（忽略目录）：`static-anchors.json`、`hud-gates.txt`、`caller-functions.txt`、`observer-source.txt`、`model-source.txt`、`live-readonly.json`、`replay-roster.json`、`visibility-gaps.json`。少数探索反汇编从非指令边界开始的行不作为证据；上述引用均使用已确认的指令边界。
+原始调查输出在 `output/archive/2026-10-27/research/observer-replay-research/`（忽略目录）：`static-anchors.json`、`hud-gates.txt`、`caller-functions.txt`、`observer-source.txt`、`model-source.txt`、`live-readonly.json`、`replay-roster.json`、`visibility-gaps.json`。少数探索反汇编从非指令边界开始的行不作为证据；上述引用均使用已确认的指令边界。
 
 - [官方训练房观战说明](https://www.wargaming.net/support/en/products/wotb/article/15441/)：公开客户端支持单队/双方观战，以及 C 键自由镜头；该说明没有承诺普通回放能切成赛事观战。
 - [当前项目固定版本的上游 arena.rs](https://github.com/fanypcd/WoT-Blitz-Agent/blob/0a9da93a0074a95af406db3468e6a81a5a6b139f/crates/replay-core/src/replay/combat/arena.rs)：`collect_aoi_lifecycle`、`decode_update_arena2`，用于回放包解析及运动覆盖检查。上游语义与本地样本统计分开记录，未把外部注释当作当前样本的实测结果。

@@ -43,8 +43,10 @@ const base=process.argv[2],root=process.argv[3],out=path.resolve('output/workben
   await page.keyboard.press('Control+Shift+z');assert.equal((await data()).tracks.x.length,1);
   const clipboardBefore=await page.evaluate(()=>JSON.stringify(sequenceEditor.clipboard));
   await page.evaluate(()=>{sequenceEditor.selected=new Set(sequenceEditor.doc.tracks.x.map(k=>k._id));sequenceEditor.render();});
-  const protectedBefore=await data();await cut();assert.deepEqual(await data(),protectedBefore);
-  assert.equal(await page.evaluate(()=>JSON.stringify(sequenceEditor.clipboard)),clipboardBefore);
+  // Camera tracks may be empty; cutting their last point remains undoable.
+  const lastKeyBefore=await data();await cut();assert.equal((await data()).tracks.x.length,0);
+  assert.notEqual(await page.evaluate(()=>JSON.stringify(sequenceEditor.clipboard)),clipboardBefore);
+  await page.keyboard.press('Control+z');assert.deepEqual(await data(),lastKeyBefore);
   await page.keyboard.press('Control+z');assert.deepEqual(await data(),before);
   await page.locator('#captureTime').dispatchEvent('cut',{clipboardData:null});assert.deepEqual(await data(),before);
 

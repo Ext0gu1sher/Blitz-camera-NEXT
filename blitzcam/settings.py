@@ -24,6 +24,12 @@ def ui_scale(value):
     return int(value)
 
 
+def startup_sound(value):
+    if not isinstance(value, bool):
+        raise ValueError('启动音效请选择开启或关闭。')
+    return value
+
+
 def keyframe_start_seconds(value):
     if value is None:
         return None
@@ -46,6 +52,7 @@ def read_settings(output):
     directory = default
     start_seconds = None
     scale = 100
+    sound = True
     controls = validate_controls()
     try:
         path = Path(output)/'settings.json'
@@ -57,10 +64,12 @@ def read_settings(output):
                 start_seconds = keyframe_start_seconds(data.get('replay_keyframe_start_seconds'))
                 scale = ui_scale(data.get('ui_scale', 100))
                 controls = validate_controls(data.get('input_controls'))
+                sound = startup_sound(data.get('startup_sound', True))
     except (OSError, ValueError, TypeError):
         pass
     return {'schema_version': 1, 'project_directory': directory, 'default_project_directory': default,
-            'replay_keyframe_start_seconds': start_seconds, 'ui_scale': scale, 'input_controls': controls}
+            'replay_keyframe_start_seconds': start_seconds, 'ui_scale': scale, 'input_controls': controls,
+            'startup_sound': sound}
 
 
 def save_settings(output, value):
@@ -71,6 +80,7 @@ def save_settings(output, value):
                                                     read_settings(output)['replay_keyframe_start_seconds']))
     scale = ui_scale(value.get('ui_scale', read_settings(output)['ui_scale']))
     controls = validate_controls(value.get('input_controls', read_settings(output)['input_controls']))
+    sound = startup_sound(value.get('startup_sound', read_settings(output)['startup_sound']))
     try:
         directory.mkdir(parents=True, exist_ok=True)
         # Test actual access, including ACLs/read-only shares, before committing.
@@ -80,5 +90,5 @@ def save_settings(output, value):
         raise ValueError(f'该文件夹无法保存项目，请选择可写的文件夹：{exc}') from exc
     atomic_json(Path(output)/'settings.json', {'schema_version': 1, 'project_directory': str(directory),
                                             'replay_keyframe_start_seconds': start_seconds, 'ui_scale': scale,
-                                            'input_controls': controls})
+                                            'input_controls': controls, 'startup_sound': sound})
     return read_settings(output)

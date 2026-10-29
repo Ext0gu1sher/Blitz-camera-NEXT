@@ -9,7 +9,7 @@ import urllib.error
 from unittest.mock import Mock, patch
 
 from blitzcam.editor_state import editor_state_path
-from blitzcam.project import recycle_project, validate_project
+from blitzcam.project import recycle_project, validate_project, read_project
 from blitzcam.server import record_recent
 from tests import test_project_files as project_files
 
@@ -27,11 +27,11 @@ class ProjectDeletionTests(unittest.TestCase):
         view = {'schema_version':1, 'timeline':{'playhead':3}}
         self.app.save_editor_state(str(target), view)
         replay = self.out/'same.wotbreplay'; replay.write_bytes(b'keep replay')
-        recycled = self.out/'recycled.json'
+        recycled = self.out/'recycled.bcnproj'
         with patch('blitzcam.server.recycle_project', side_effect=lambda p: (p.rename(recycled), True)[1]) as recycle:
             reply = self.request('/api/projects/delete', {'path':str(target), 'expected_revision':revision})
         self.assertTrue(reply['ok']); recycle.assert_called_once_with(target)
-        self.assertEqual(json.loads(recycled.read_text(encoding='utf-8')), before)
+        self.assertEqual(read_project(recycled).to_dict(), before)
         self.assertFalse(target.exists()); self.assertEqual(replay.read_bytes(), b'keep replay')
         self.assertFalse(editor_state_path(self.out,target).exists())
         self.assertNotEqual(self.app.project_path, target)

@@ -22,7 +22,19 @@ class ReplaySpeedTests(unittest.TestCase):
     def test_fixed_rate_replay_domain_extends_shooting_duration(self):
         s=validate_speed({'mode':'fixed','rate':.25,'camera_clock':'replay'})
         self.assertEqual(shooting_duration(8,s),32)
-        with self.assertRaises(ValueError):shooting_duration(40,s)
+        self.assertEqual(shooting_duration(40,s),160)
+        s['rate']=.0625
+        self.assertEqual(shooting_duration(120,s),1920)
+        with self.assertRaises(ValueError):shooting_duration(120.1,s)
+
+    def test_timing_rejection_explains_the_converted_duration(self):
+        s=validate_speed({'mode':'fixed','rate':.0625,'camera_clock':'replay'})
+        with self.assertRaises(ValueError) as caught:shooting_duration(121,s)
+        self.assertIn('1936.000',str(caught.exception))
+        self.assertIn('121.000',str(caught.exception))
+        self.assertIn('0.0625×',str(caught.exception))
+        with self.assertRaisesRegex(ValueError,'延长区间'):
+            shooting_duration(.1,validate_speed({'mode':'fixed','rate':1,'camera_clock':'replay'}))
     def test_partial_curve_integrals_and_inverse(self):
         for interpolation in ('smooth','linear'):
             s=validate_speed({'mode':'curve','interpolation':interpolation,

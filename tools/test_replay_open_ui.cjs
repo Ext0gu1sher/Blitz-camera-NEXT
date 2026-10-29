@@ -102,7 +102,7 @@ fs.mkdirSync(out,{recursive:true});
   assert.equal((await state()).playback.active,false);
   // A service restart has no in-memory launch ticket; still show the source
   // actually read from the running game's arguments, without a false mismatch.
-  const restored={...await state(),replay_launch:{state:'idle',message:'选择回放'},replay_info:{...openedInfo,source:'launch_argument'}};
+  const restored={...await state(),replay_launch:{state:'idle',message:'选择回放'},replay_info:{...openedInfo,source:'runtime_replay',verification:'runtime_replay'}};
   const reconnected=await context.newPage();reconnected.on('pageerror',e=>errors.push(e.message));
   await reconnected.route('**/api/state',route=>route.fulfill({json:restored}));
   await reconnected.goto(base+'/');

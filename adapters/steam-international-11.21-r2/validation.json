@@ -1,0 +1,16 @@
+{
+  "format": "blitz-camera-adapter-validation-v1",
+  "date": "2026-10-27",
+  "source_baseline": "1.0.1-beta working tree; same exact Steam 11.21 game build as r1",
+  "client_sha256": "5030ee4b9f6ec7db1c06efa2b92f9dd7243574be5d8d9578c118119318bc9608",
+  "position_dll_sha256": "5535bc201ad13f140fa8603ea758c9754b70d474738edc7c0ab99333f91c6800",
+  "host_compatibility": "The v1 imports and entrypoints remain compatible with 1.0.0-beta. The paired 1.0.1-beta host update is required to expose the extended shooting duration and lifecycle fixes; install the host first.",
+  "checks": [
+    {"name": "ordinary regression including publisher master and package tests", "status": "passed", "detail": "python -X utf8 -m unittest discover -s tests: 633 tests, 632 passed, 1 dependency skip; output/release-tests-1.0.1-beta.log"},
+    {"name": "native compilation, ABI and selftests", "status": "passed", "detail": "tools/build_position_hook.ps1 completed; selftests rerun to output/native-selftest-1.0.1-beta.log. 198-second and 1920-second execution uses a fixed 3-point test path, restoration and watchdog assertions pass."},
+    {"name": "reported replay interval", "status": "passed", "detail": "243.597194335 to 255.983333333; paused at 243.60595321655273; held curve endpoint at 1/16 gives 198.0380818631561 actual seconds. Accepted without changing the project or unbounded sample growth."},
+    {"name": "project switch and association lifecycle", "status": "passed", "detail": "Switching projects clears stale launch evidence and invalidates pending association; actual different-replay mismatch remains rejected."},
+    {"name": "new live game session", "status": "not_run", "detail": "No injection or game playback performed for this release validation."}
+  ],
+  "limitations": ["Exact game hash only", "Laptop-wide freeze has not been reproduced on the laptop", "Device-specific package requires the original Windows user and device key"]
+}

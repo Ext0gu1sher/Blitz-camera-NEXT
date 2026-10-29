@@ -1,5 +1,22 @@
 import assert from 'node:assert/strict';
-import {flightSeekSeconds,cameraBasis} from '../../blitzcam/web/replay-preview-core.js';
+import {flightSeekSeconds,cameraBasis,CameraMotionMeter} from '../../blitzcam/web/replay-preview-core.js';
+
+// World-space distance per real second, independent of extra renders, display
+// refresh rate and camera orientation. Explicit cuts never count as travel.
+for(const fps of [30,60,144]){
+  const meter=new CameraMotionMeter();meter.sample([0,0,0],0);
+  for(let i=1;i<=fps;i++){
+    const t=i/fps,position=[3*t,4*t,0],now=t*1000;
+    meter.sample(position,now);meter.sample(position,now);
+  }
+  assert.ok(Math.abs(meter.speed-5)<1e-8);
+  meter.reset();assert.equal(meter.sample([10000,0,0],1100),0);
+  assert.equal(meter.sample([10000,0,0],1300),0);
+  assert.equal(meter.sample([10020,0,0],1400),200);
+  assert.equal(meter.sample([0,0,0],3000),0,'resume after idle starts a new measurement');
+  assert.equal(meter.sample([NaN,0,0],3100),0);
+  assert.equal(meter.sample([],3200),0);
+}
 
 for(const t of [-1,0,.1,.25])assert.equal(flightSeekSeconds(t),0,'quick taps must stay single-frame');
 let previousRate=0;

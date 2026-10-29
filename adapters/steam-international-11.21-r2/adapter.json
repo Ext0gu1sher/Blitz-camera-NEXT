@@ -1,0 +1,33 @@
+{
+  "format": "blitz-camera-pro-source-v1",
+  "release": {
+    "adapter_id": "steam-international",
+    "version": "11.21-r2",
+    "adapter_api": 1,
+    "host_min_version": "1.0.0-beta",
+    "client": {
+      "channel": "Steam 国际版",
+      "version": "11.21.0.1235",
+      "sha256": "5030ee4b9f6ec7db1c06efa2b92f9dd7243574be5d8d9578c118119318bc9608",
+      "architecture": "x86"
+    },
+    "entrypoints": {
+      "reader": "reader:CameraSession",
+      "playback": "playback:PositionPlayback"
+    },
+    "notes": "配合 1.0.1-beta 主程序更新：慢速拍摄支持最长 1920 秒实际执行时长，保留回放区间和采样容量限制；延长相应等待时间，保留暂停、取消与看门狗恢复机制。更新回放来源核对实现。请先安装主程序更新，再导入本适配包。",
+    "validation": {
+      "level": "offline",
+      "summary": "633 项回归测试完成（632 通过、1 项依赖跳过），含母包、设备加密与部署测试；原生自检覆盖 198 秒及 1920 秒慢动作、取消与状态恢复，ABI 校验通过。本次未在真实游戏中执行新 DLL，未声称完成笔记本现场复测。"
+    }
+  },
+  "source_root": "source",
+  "native_manifests": [
+    "position_hook_1121.json",
+    "replay_seek_phase_trial_1121.json",
+    "freecamera_switch_1121.json"
+  ],
+  "evidence": [
+    "validation.json"
+  ]
+}

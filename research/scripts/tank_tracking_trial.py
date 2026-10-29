@@ -9,12 +9,14 @@ import ctypes as C
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import struct
 import sys
 import time
 import urllib.request
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -35,7 +37,8 @@ class TrackConfig(C.Structure):
     _pack_ = 4
     _fields_ = [(n, C.c_uint32) for n in ('magic','size','visual','transform','eid','preset','lag_frames','phase')]+[
         ('distance',C.c_float),('height',C.c_float),('anchor',C.c_float*3),
-        ('orbit_degrees',C.c_float),('smooth_seconds',C.c_float)]
+        ('orbit_degrees',C.c_float),('smooth_seconds',C.c_float),
+        ('part_entity',C.c_uint32),('part_transform',C.c_uint32),('part_parents',C.c_uint32*4)]
 
 
 class TrackEvent(C.Structure):
@@ -75,11 +78,41 @@ def anchor_at(matrix, local):
     return [matrix[12+j]+sum(local[i]*matrix[i*4+j] for i in range(3)) for j in range(3)]
 
 
+def muzzle_part(s, target):
+    """Bind one exact named child chain; never select a nearby object by position."""
+    m=s.memory;parent=target['visual'];chain=[]
+    for name in ('hullJoint','turretJoint','maskJoint','gunJoint','gunFireJoint'):
+        before=m.read(parent+8,12);begin,end,capacity=struct.unpack('<3I',before)
+        if not (0x10000<=begin<=end<=capacity<=begin+4096) or (end-begin)%4:
+            raise CameraError('炮口节点列表无效。')
+        children=m.read(begin,end-begin);found=[]
+        for child, in struct.iter_unpack('<I',children):
+            if (m.u32(child)!=s.live(0x3762c90) or m.u32(child+0x14)!=s.objects.scene or
+                    m.u32(child+0x18)!=parent):continue
+            pointer=m.u32(child+0x1c)
+            if pointer and m.read(pointer,len(name)+1)==name.encode()+b'\0':found.append(child)
+        if m.read(parent+8,12)!=before or m.read(begin,end-begin)!=children:
+            raise CameraError('炮口节点正在变化，请暂停后重试。')
+        if len(found)!=1:raise CameraError(f'当前坦克无法唯一定位炮口节点：{name}。')
+        parent=found[0];chain.append(parent)
+    transform=m.u32(parent+0x3c)
+    if m.u32(transform)!=s.live(0x3724564) or m.u32(transform+8)!=parent:
+        raise CameraError('炮口节点的变换归属无效。')
+    matrix=m.read(transform+0x60,64)
+    if m.read(transform+0x60,64)!=matrix:raise CameraError('炮口位置正在变化，请暂停后重试。')
+    return dict(entity=parent,transform=transform,parents=list(reversed(chain[:-1])),
+                matrix=list(struct.unpack('<16f',matrix)),path='hullJoint/turretJoint/maskJoint/gunJoint/gunFireJoint')
+
+
 def initial_pose(target, args, fov):
-    m=target['matrix'];heading=math.atan2(m[5],m[4])
+    m=target.get('muzzle',target)['matrix'];heading=math.atan2(m[5],m[4])
     angle=heading+(math.pi/2 if args.preset=='side' else math.pi)
     p=[m[12]+math.cos(angle)*args.distance,m[13]+math.sin(angle)*args.distance,m[14]+args.height]
-    a=anchor_at(m,args.anchor);d=[y-x for x,y in zip(p,a)]
+    a=anchor_at(m,args.anchor)
+    if args.preset=='muzzle':
+        side=math.radians(args.muzzle_angle)
+        p=[a[j]+m[j]*args.distance*math.sin(side)+m[4+j]*args.distance*math.cos(side)+m[8+j]*args.height for j in range(3)]
+    d=[y-x for x,y in zip(p,a)]
     yaw=math.degrees(math.atan2(d[1],d[0]));pitch=math.degrees(math.atan2(d[2],math.hypot(*d[:2])))
     return dict(position=p,quaternion=quaternion_from_angles(yaw,pitch,0),horizontal_fov_deg=fov)
 
@@ -122,7 +155,7 @@ def measure(camera_events, target_events, width=1920, height=1080):
         frames.append(dict(commit=cam['commit'],raw_time=cam['raw_time'],error_px=errors[-1],
                            root=target['root'],anchor=target['anchor']))
         last=target
-    return dict(metric='TankVisual anchor projected through camera matrices at shadow draw entry',
+    return dict(metric='Selected display anchor projected through camera matrices at shadow draw entry',
                 viewport=[width,height],center_error_px=stats(errors),
                 previous_draw_target_error_px=stats(stale),update_to_draw_target_delta_m=stats(phase),
                 target_motion_per_draw_m=stats(movement),invalid=invalid,unmatched=unmatched,
@@ -130,21 +163,49 @@ def measure(camera_events, target_events, width=1920, height=1080):
                 caveat='Matrix measurement, not image-space feature tracking or final presented-frame verification.')
 
 
+def process_exited(pid):
+    """Only declare an unreachable workstation gone when Windows confirms it."""
+    if os.name!='nt' or type(pid) is not int or pid<=0:return False
+    from ctypes import wintypes as W
+    k=C.WinDLL('kernel32',use_last_error=True)
+    k.OpenProcess.argtypes=[W.DWORD,W.BOOL,W.DWORD];k.OpenProcess.restype=W.HANDLE
+    k.GetExitCodeProcess.argtypes=[W.HANDLE,C.POINTER(W.DWORD)];k.GetExitCodeProcess.restype=W.BOOL
+    k.CloseHandle.argtypes=[W.HANDLE];k.CloseHandle.restype=W.BOOL
+    h=k.OpenProcess(0x1000,False,pid)
+    if not h:return C.get_last_error()==87  # ERROR_INVALID_PARAMETER: no such PID.
+    try:
+        code=W.DWORD()
+        return bool(k.GetExitCodeProcess(h,C.byref(code))) and code.value!=259
+    finally:k.CloseHandle(h)
+
+
 def require_idle():
     service=ROOT/'output/workstation-service.json'
     if service.exists():
-        url=json.loads(service.read_text(encoding='utf8'))['url'].rstrip('/')
-        # Refuse an unknown/busy workstation state rather than fighting its hook.
-        with urllib.request.urlopen(url+'/api/state',timeout=5) as r:state=json.load(r)
+        saved=json.loads(service.read_text(encoding='utf8'));url=saved['url'].rstrip('/')
+        try:
+            with urllib.request.urlopen(url+'/api/state',timeout=5) as r:state=json.load(r)
+        except urllib.error.URLError as exc:
+            if process_exited(saved.get('pid')):return
+            raise CameraError('工作台状态暂时无法确认，请先关闭或重新打开工作台，再重试。') from exc
         if state['playback']['active'] or not state['playback'].get('hooks_detached',True):
             raise CameraError('Stop workstation playback before the isolated trial.')
 
 
-def run(args):
+def run(args, *, stop_requested=None, on_progress=None):
+    cancelled=stop_requested or (lambda: False)
+    progress=on_progress or (lambda state: None)
+    def cancelled_result():
+        result={'state':'cancelled','message':'已取消准备，未开始跟踪。'}
+        print(json.dumps(result,ensure_ascii=False));return result
+    if args.anchor is None:args.anchor=[0,0,0] if args.preset=='muzzle' else [0,0,1.5]
     if not .5<=args.seconds<=12 or not .0625<=args.rate<=1:raise ValueError('Clip: 0.5–12 replay seconds, rate 1/16–1.')
     if not 3<=args.distance<=100 or not -30<=args.height<=30:raise ValueError('Invalid camera offset.')
     if not 0<=args.smooth<=2 or not abs(args.orbit_speed)<=90 or any(not math.isfinite(x) or abs(x)>10 for x in args.anchor):raise ValueError('Invalid tracking parameters.')
+    if not math.isfinite(args.muzzle_angle) or abs(args.muzzle_angle)>90:raise ValueError('Muzzle angle must be between -90 and 90 degrees.')
     if args.stop_after is not None and not .1<=args.stop_after<=30:raise ValueError('Stop-after must be 0.1–30 wall-clock seconds after playback begins.')
+    if cancelled():return cancelled_result()
+    progress({'state':'connecting','message':'正在读取暂停的回放和坦克，请稍候…'})
     require_idle()
     s=CameraSession.connect()
     try:
@@ -155,14 +216,20 @@ def run(args):
         selected=[row for row in rows if row['eid']==eid]
         if len(selected)!=1:raise CameraError(f'Need one scene-bound target for entity {eid}; found {len(selected)}.')
         target=selected[0]
+        if args.preset=='muzzle':target['muzzle']=muzzle_part(s,target)
         summary=dict(clock=snap['replay'],source=timeline,selected=target,
                      available=[dict(eid=x['eid'],position=x['position']) for x in rows])
+        if cancelled():return cancelled_result()
         if not args.execute:
-            print(json.dumps(summary,ensure_ascii=False,indent=2));return
+            print(json.dumps(summary,ensure_ascii=False,indent=2));return summary
         config=TrackConfig(magic=0x31544b42,size=C.sizeof(TrackConfig),visual=target['visual'],
-                           transform=target['transform'],eid=eid,preset=['chase','side','orbit'].index(args.preset),
+                           transform=target['transform'],eid=eid,preset=['chase','side','orbit','muzzle'].index(args.preset),
                            lag_frames=args.lag_frames,phase=int(args.phase=='scene'),distance=args.distance,height=args.height,
-                           anchor=(C.c_float*3)(*args.anchor),orbit_degrees=args.orbit_speed,smooth_seconds=args.smooth)
+                           anchor=(C.c_float*3)(*args.anchor),
+                           orbit_degrees=args.muzzle_angle if args.preset=='muzzle' else args.orbit_speed,smooth_seconds=args.smooth)
+        if args.preset=='muzzle':
+            part=target['muzzle'];config.part_entity=part['entity'];config.part_transform=part['transform']
+            config.part_parents=(C.c_uint32*4)(*part['parents'])
         start=snap['replay']['time'];end=start+args.seconds
         if end>timeline['duration_sec']:raise CameraError('Clip extends past replay end.')
         pose=initial_pose(target,args,args.fov if args.fov is not None else snap['camera']['horizontal_fov_deg'])
@@ -176,7 +243,7 @@ def run(args):
         if manifest['production_source_sha256']!=hashlib.sha256(current_source.encode()).hexdigest():raise CameraError('Rebuild experiment against current production source.')
         extension=(ROOT/'research/native/tank_tracking_1121.h').read_text()
         if manifest['extension_sha256']!=hashlib.sha256(extension.encode()).hexdigest():raise CameraError('Rebuild experiment against current tracking extension.')
-        if C.sizeof(TrackConfig)!=60 or C.sizeof(TrackEvent)!=120:raise CameraError('Tracking ABI changed; review native layout.')
+        if C.sizeof(TrackConfig)!=84 or C.sizeof(TrackEvent)!=120:raise CameraError('Tracking ABI changed; review native layout.')
         captures=[]
         capture_status={'dropped':0,'scene_hook_detached':None}
         class TrialRemote(Remote):
@@ -214,12 +281,17 @@ def run(args):
         playback.NATIVE=native;playback.Remote=TrialRemote
         driver=playback.PositionPlayback(OUT/'runs')
         try:
-            require_idle();driver.start(trajectory,snap)
-            began=None;stop_sent=False
+            require_idle()
+            if cancelled():return cancelled_result()
+            driver.start(trajectory,snap)
+            began=None;stop_sent=False;previous=None
             while driver.thread.is_alive():
                 driver.thread.join(.1)
-                if driver.state()['state']=='playing' and began is None:began=time.monotonic()
-                if args.stop_after is not None and began is not None and not stop_sent and time.monotonic()-began>=args.stop_after:
+                current=driver.state();signature=(current['state'],current['message'])
+                if signature!=previous:
+                    progress({'state':current['state'],'message':current['message']});previous=signature
+                if current['state']=='playing' and began is None:began=time.monotonic()
+                if not stop_sent and (cancelled() or (args.stop_after is not None and began is not None and time.monotonic()-began>=args.stop_after)):
                     driver.stop();stop_sent=True
         except BaseException:
             driver.stop(wait=True);raise
@@ -237,19 +309,21 @@ def run(args):
         atomic_json(folder/'tracking-report.json',report)
         print(json.dumps(dict(run=str(folder),state=state['state'],message=state['message'],
                               hooks_detached=state['hooks_detached'],measurement={k:v for k,v in measurement.items() if k!='frames'}),ensure_ascii=False,indent=2))
-        accepted=('completed','stopped') if args.stop_after is not None else ('completed',)
+        accepted=('completed','stopped') if args.stop_after is not None or stop_sent else ('completed',)
         if state['state'] not in accepted or not state['hooks_detached']:raise CameraError('Trial did not complete; inspect saved report.')
+        return report
     finally:s.close()
 
 
 def parser():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--execute',action='store_true');p.add_argument('--eid',type=int)
-    p.add_argument('--preset',choices=['chase','side','orbit'],default='chase')
+    p.add_argument('--preset',choices=['chase','side','orbit','muzzle'],default='chase')
     p.add_argument('--seconds',type=float,default=4);p.add_argument('--rate',type=float,default=1)
     p.add_argument('--distance',type=float,default=15);p.add_argument('--height',type=float,default=6)
-    p.add_argument('--anchor',type=float,nargs=3,default=[0,0,1.5]);p.add_argument('--fov',type=float)
+    p.add_argument('--anchor',type=float,nargs=3);p.add_argument('--fov',type=float)
     p.add_argument('--orbit-speed',type=float,default=15);p.add_argument('--smooth',type=float,default=0)
+    p.add_argument('--muzzle-angle',type=float,default=-45,help='Oblique muzzle view: negative left, positive right, zero ahead.')
     p.add_argument('--lag-frames',type=int,choices=[0,1],default=0,help='Deliberate stale-target control experiment')
     p.add_argument('--phase',choices=['update','scene'],default='scene',help='Compare early camera update with post-scene evaluation')
     p.add_argument('--stop-after',type=float,help='Exercise cancellation after this many wall-clock seconds of linked playback')

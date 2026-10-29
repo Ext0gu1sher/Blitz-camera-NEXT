@@ -1,0 +1,45 @@
+const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const out=path.resolve('output/project-format-acceptance');fs.mkdirSync(out,{recursive:true});
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],gameRequests=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(/\/api\/(connect|playback\/start|replay\/open)$/.test(r.url()))gameRequests.push(r.url());});
+ const [base,source,bcn,restored]=process.argv.slice(2),read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
+ const idle=()=>page.waitForFunction(()=>!state.busy);
+ const settings=async()=>{await page.locator('#settingsButton').click();await page.waitForFunction(()=>applicationSettings&&!settingsLoading);};
+ const convert=async id=>{await page.locator(id).click();await idle();};
+ try{
+  await page.goto(base);await page.waitForFunction(()=>state.loaded&&state.samples.length>1&&!sequenceEditor.locked&&!pendingEditorRestore&&document.body.dataset.appReady==='true');
+  await page.evaluate(()=>sequenceEditor.edit(()=>sequenceEditor.doc.tracks.x[0].value=17));
+  assert.equal(await page.evaluate(()=>state.tracks.x[0].value),17);
+  assert.equal(await page.evaluate(()=>state.dirty),true);
+  await settings();
+  assert.equal(await page.locator('#projectConversion').isVisible(),true);
+  await convert('#convertToBcn');assert.match(await page.locator('#projectConversionResult').textContent(),/取消/);
+  await convert('#convertToBcn');assert.match(await page.locator('#projectConversionResult').textContent(),/已转换/);
+  assert.equal(read(bcn).format,'blitz-camera-project');assert.deepEqual(read(bcn).project,read(source));
+  assert.equal(read(bcn).project.camera_tracks.x[0].value,17);
+  assert.equal(await page.evaluate(()=>state.projectPath),source);
+  await convert('#convertToJson');assert.deepEqual(read(restored),read(bcn).project);
+  await page.locator('#projectConversion').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(out,'conversion-settings.png')});
+  const original=fs.readFileSync(bcn,'utf8');
+  await convert('#convertToBcn');assert.match(await page.locator('#projectConversionResult').textContent(),/已存在/);assert.equal(fs.readFileSync(bcn,'utf8'),original);
+  await convert('#convertToBcn');assert.equal(await page.locator('#projectConversionResult').evaluate(el=>el.classList.contains('error')),true);
+  await page.locator('#settingsControlsTab').click();assert.equal(await page.locator('#projectConversion').isVisible(),false);
+  await page.locator('#settingsGeneralTab').click();
+  await page.locator('#settingsBack').click();
+  await page.evaluate(()=>sequenceEditor.edit(()=>sequenceEditor.doc.tracks.x[0].value=23));
+  assert.equal((await page.request.post(base+'/api/desktop/project',{data:{path:bcn}})).ok(),true);
+  await page.locator('#draftSave').click();
+  await page.waitForFunction(p=>state.projectPath===p&&!state.desktopProjectOpening&&!state.busy,bcn);
+  assert.equal(read(source).camera_tracks.x[0].value,23);assert.equal(await page.evaluate(()=>state.tracks.x[0].value),17);
+  await page.evaluate(()=>sequenceEditor.edit(()=>sequenceEditor.doc.tracks.x[0].value=31));await page.waitForFunction(()=>!state.dirty);
+  assert.equal(read(bcn).format_version,1);assert.equal(read(bcn).project.camera_tracks.x[0].value,31);
+  await page.reload();await page.waitForFunction(()=>state.loaded&&document.body.dataset.appReady==='true');
+  assert.equal(await page.evaluate(()=>state.tracks.x[0].value),31);
+  await page.locator('#homeButton').click();await settings();assert.equal(await page.locator('#convertToBcn').isEnabled(),true);
+  assert.deepEqual(errors,[]);assert.deepEqual(gameRequests,[]);
+  const result={passed:true,roundtrip:true,autosaveBeforeConversion:true,sourcePreserved:true,cancel:true,collision:true,invalidFile:true,settingsVisibility:true,desktopOpenPreservesDraft:true,bcnAutosaveAndReload:true,homeConversion:true};
+  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ }catch(e){await page.screenshot({path:path.join(out,'failure.png')});throw e;}finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

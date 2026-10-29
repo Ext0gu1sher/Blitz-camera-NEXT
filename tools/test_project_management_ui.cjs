@@ -4,10 +4,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
   const [base,alpha,beta,forgotten,replay]=process.argv.slice(2);
   const out=path.resolve('output/project-management-acceptance');fs.mkdirSync(out,{recursive:true});
   const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
-  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],requests=[],opens=[];let listings=0;
+  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],requests=[],opens=[],folders=[];let listings=0;
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{
     if(r.url().endsWith('/api/projects/delete'))requests.push(r.postDataJSON());
     if(r.url().endsWith('/api/projects/open'))opens.push(r.postDataJSON());
+    if(r.url().endsWith('/api/projects/open_folder'))folders.push(r.postDataJSON());
     if(r.url().endsWith('/api/projects/recent'))listings++;
   });
   const row=name=>page.locator('#homeRows .home-project').filter({has:page.locator('.home-project-name',{hasText:name})});
@@ -32,6 +33,64 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     await choose('当前项目','info');
     assert.equal(await page.locator('#homeInfoPath').textContent(),beta);
     await page.keyboard.press('Escape');assert.equal(opens.length,0);
+    // The folder action uses the selected row even when another project is active.
+    await row('旧项目').locator('.home-more').click();
+    await menu.screenshot({path:path.join(out,'project-menu-folder.png')});
+    const folderResponse=page.waitForResponse(base+'/api/projects/open_folder');
+    await menu.getByRole('menuitem',{name:'打开项目所在文件夹',exact:true}).click();await idle();
+    assert.equal((await folderResponse).ok(),true);assert.equal(await menu.isVisible(),false);
+    assert.equal(await page.evaluate(()=>state.projectPath),beta);assert.equal(opens.length,0);
+    assert.equal(folders.length,1,'one folder request per click');
+    assert.equal(await page.evaluate(()=>!!document.activeElement.closest('.home-project')),false,'mouse menu action must not leave the old row focused');
+    await row('当前项目').hover();
+    assert.equal(await page.locator('.home-project').evaluateAll(rows=>rows.filter(r=>getComputedStyle(r).backgroundColor==='rgb(39, 42, 37)').length),1,'only the hovered row is highlighted');
+    await page.screenshot({path:path.join(out,'folder-action-focus.png')});
+    await row('当前项目').locator('.home-more').click();await page.keyboard.press('ArrowDown');
+    assert.equal(await page.locator(':focus').getAttribute('data-home-action'),'folder');
+    await page.keyboard.press('Enter');await idle();
+    await choose('已丢失','folder');await idle();
+    assert.deepEqual(folders.map(item=>item.path),[alpha,beta,path.join(path.dirname(beta),'已丢失.json')]);
+    // A native host must receive one request; Python only validates the path.
+    // Hold the reply to ensure success is not reported before native activation.
+    const nativePage=await browser.newPage();
+    try{
+      await nativePage.addInitScript(()=>{
+        const listeners=[];
+        window.folderNativeMessages=[];
+        window.folderNativeReply=data=>listeners.forEach(fn=>fn({data}));
+        window.chrome.webview={
+          addEventListener:(type,fn)=>{if(type==='message')listeners.push(fn);},
+          postMessage:message=>{
+            if(message.command==='ready')window.folderNativeReply({type:'host-state',projectFolder:true});
+            if(message.command==='open-project-folder')window.folderNativeMessages.push(message);
+          },
+        };
+      });
+      const nativeRequests=[];
+      nativePage.on('request',r=>{if(r.url().endsWith('/api/projects/open_folder'))nativeRequests.push(r.postDataJSON());});
+      await nativePage.goto(base+'/?home=1');
+      await nativePage.waitForFunction(()=>document.body.dataset.appReady==='true'&&!homeLoading&&nativeHostState?.projectFolder);
+      const nativeRow=nativePage.locator('.home-project').filter({has:nativePage.locator('.home-project-name',{hasText:'旧项目'})});
+      const nativeClick=async()=>{
+        await nativeRow.locator('.home-more').click();
+        await nativePage.locator('[data-home-action=folder]').click();
+      };
+      await nativeClick();
+      await nativePage.waitForFunction(()=>folderNativeMessages.length===1);
+      assert.deepEqual(nativeRequests,[{path:alpha,native:true}]);
+      assert.equal(await nativePage.evaluate(()=>folderNativeMessages[0].directory),path.dirname(alpha));
+      assert.equal(await nativePage.evaluate(()=>state.busy&&folderOpenRequests.size===1),true);
+      assert.equal(await nativePage.locator('#toast').textContent(),'');
+      await nativePage.evaluate(()=>folderNativeReply({type:'project-folder-opened',id:folderNativeMessages[0].id}));
+      await nativePage.waitForFunction(()=>!state.busy&&folderOpenRequests.size===0);
+      assert.equal(await nativePage.locator('#toast').textContent(),'已打开项目所在文件夹。');
+      await nativeClick();
+      await nativePage.waitForFunction(()=>folderNativeMessages.length===2);
+      await nativePage.evaluate(()=>folderNativeReply({type:'project-folder-opened',id:folderNativeMessages[1].id,error:'文件夹已打开，但未能切到前台。'}));
+      await nativePage.waitForFunction(()=>!state.busy&&folderOpenRequests.size===0);
+      assert.equal(await nativePage.locator('#toast').textContent(),'文件夹已打开，但未能切到前台。');
+      assert.equal(nativeRequests.length,2,'native failure must not open Explorer a second time through Python');
+    }finally{await nativePage.close();}
     await row('当前项目').locator('.home-project-open').click();await idle();
     assert.equal(await page.locator('#homeView').isVisible(),false);assert.equal(opens.length,1);assert.equal(opens[0].path,beta);
     await page.locator('#homeButton').click();await idle();
@@ -78,6 +137,6 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     assert.ok(fs.existsSync(beta));
     assert.notDeepEqual(await page.evaluate(()=>state.tracks),edited);
     assert.equal(requests.length,2);assert.equal(opens.length,1);assert.deepEqual(errors,[]);
-    console.log('PASS: local search/sort, one-click open, details/menu isolation, remove-only, cancel/Escape, delete inactive/current, preserve drafts/replay, prevent resurrection and reuse names.');
+    console.log('PASS: local search/sort, one-click open, details/menu isolation, selected project folder via mouse/keyboard including missing file, remove-only, cancel/Escape, delete inactive/current, preserve drafts/replay, prevent resurrection and reuse names.');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

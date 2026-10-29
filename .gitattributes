@@ -15,3 +15,7 @@
 # Preserve upstream bytes used by vendored provenance hashes.
 /blitzcam/web/vendor/** -text
 /blitzcam/preview_vendor/** -text
+
+# Preserve exact source bytes from issued Pro masters.
+/adapters/steam-international-11.21/source/** -text whitespace=cr-at-eol
+/adapters/steam-international-11.21-r2/source/** -text whitespace=cr-at-eol

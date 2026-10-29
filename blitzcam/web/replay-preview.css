@@ -6,6 +6,9 @@
 #previewEmpty .ic{width:22px;height:22px;color:#6a7a55}
 #previewEmpty:not([aria-disabled=true]):hover .ic{color:var(--lime)}
 #previewEmpty[hidden]{display:none}
+.replay-drop-hint{color:#a1ac91;font-size:13px;line-height:1.9}
+.replay-drop-hint small{color:#7f8873;font-size:11px}
+.replay-drop-hint[hidden]{display:none}
 .pe-progress{width:180px;height:3px;background:#2c2c2c;border-radius:2px;overflow:hidden}
 .pe-progress[hidden]{display:none}
 .pe-progress i{display:block;height:100%;width:0;background:var(--lime);transition:width .3s ease}
@@ -17,6 +20,8 @@
 .override-pill .ic{width:11px;height:11px}
 .override-pill[hidden]{display:none}
 .preview-scene-hud{position:absolute;top:8px;left:10px;right:10px;display:flex;justify-content:space-between;color:#dcdcdc;font-size:9px;gap:10px;pointer-events:none;text-shadow:0 1px 4px #000;font-family:Consolas,monospace}
+.preview-camera-hud{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto;text-align:right;font-variant-numeric:tabular-nums}
+.preview-camera-metrics{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:4px 12px}
 .preview3d-active #pathCanvas,.preview3d-active #canvasEmpty,.preview3d-active .preview-toolbar .view-controls{display:none!important}
 .preview-camera-label{position:absolute;transform:translate(15px,20px);padding:3px 6px;border:1px solid #8bdbd84d;background:#0b1b20df;color:#b5f4eb;border-radius:4px;font:10px Consolas,monospace;white-space:nowrap;pointer-events:none;text-shadow:0 1px 3px #000}
 .preview-camera-label[hidden]{display:none}

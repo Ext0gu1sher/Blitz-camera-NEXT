@@ -1,0 +1,13 @@
+{
+  "format": "blitz-camera-adapter-validation-v1",
+  "date": "2026-10-26",
+  "source_baseline": "0.9.6-beta working tree; existing Steam 11.21 adapter",
+  "client_sha256": "5030ee4b9f6ec7db1c06efa2b92f9dd7243574be5d8d9578c118119318bc9608",
+  "checks": [
+    {"name": "existing regression suite", "status": "passed", "detail": "571 tests, 570 passed and 1 existing dependency skip before introducing Pro Studio"},
+    {"name": "encrypted device package deployment", "status": "passed", "detail": "Real Windows CNG, cross-device rejection, altered package rejection, native-free public baseline"},
+    {"name": "runtime adapter import", "status": "passed", "detail": "Modules load through authenticated adapter namespace; no game connection"},
+    {"name": "new live game session", "status": "not_run", "detail": "This master standardization task does not execute Hook"}
+  ],
+  "limitations": ["Exact hash only; no claim of support for other game builds", "New client adaptation still requires analysis and verification"]
+}

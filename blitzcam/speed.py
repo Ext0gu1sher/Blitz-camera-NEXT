@@ -2,6 +2,9 @@
 import math
 from copy import deepcopy
 
+# A 120-second replay interval at the supported minimum rate of 1/16x.
+# Wall-clock time does not consume additional camera table entries.
+MAX_SHOOTING_SECONDS = 120 / .0625
 DEFAULT = {"mode":"paused", "rate":0.25, "camera_clock":"replay", "interpolation":"smooth",
            "keyframes":[{"progress":0.,"rate":1.},{"progress":0.25,"rate":0.25},
                         {"progress":0.75,"rate":0.25},{"progress":1.,"rate":1.}]}
@@ -108,7 +111,7 @@ def playback_timing(trajectory, s):
     if schedule:
         total,offset=schedule
         seconds=getattr(trajectory,'shooting_seconds',total-offset)
-        if not .5<=seconds<=120:raise ValueError('剩余拍摄时长需为 0.5–120 秒，请调整工作区间。')
+        validate_shooting_duration(seconds,trajectory.duration,s,trajectory.start_time,trajectory.end_time)
         return seconds,total,offset
     seconds=shooting_duration(trajectory.duration,s,trajectory.shooting_mode)
     return seconds,seconds,0.
@@ -119,5 +122,22 @@ def shooting_duration(duration,s,shooting_mode=None):
             raise ValueError('镜头动画需有大于零的时长。')
         return duration
     result=duration/mean_rate(s) if s['mode']!='paused' and s['camera_clock']=='replay' else duration
-    if not .5<=result<=120:raise ValueError('实际拍摄时长需在 0.5–120 秒；请缩短轨迹或提高倍率。')
+    validate_shooting_duration(result,duration,s)
     return result
+
+
+def validate_shooting_duration(seconds, duration, speed, start=None, end=None):
+    if .5<=seconds<=MAX_SHOOTING_SECONDS:
+        return
+    message=f'实际拍摄时长为 {seconds:.3f} 秒，单次允许 0.5–{MAX_SHOOTING_SECONDS:g} 秒。'
+    if speed['mode']!='paused' and speed['camera_clock']=='replay':
+        message+=f' 当前回放区间长 {duration:.3f} 秒，拍摄时长还需按回放倍率换算。'
+        bounds=speed.get('time_range') if speed['mode']=='curve' else None
+        if bounds and start is not None and start>=bounds['end_sec']-1e-6:
+            message+=f' 这段区间已在速度曲线终点 {bounds["end_sec"]:.3f} 秒之后，全程保持末尾 {speed["keyframes"][-1]["rate"]:g}×。'
+        elif bounds and end is not None and end<=bounds['start_sec']+1e-6:
+            message+=f' 这段区间在速度曲线起点 {bounds["start_sec"]:.3f} 秒之前，全程保持起始 {speed["keyframes"][0]["rate"]:g}×。'
+        elif speed['mode']=='fixed':
+            message+=f' 当前固定倍率为 {speed["rate"]:g}×。'
+    message+=(' 请延长区间或降低倍率。' if seconds<.5 else ' 请调整速度曲线、提高倍率或缩短区间。')
+    raise ValueError(message)

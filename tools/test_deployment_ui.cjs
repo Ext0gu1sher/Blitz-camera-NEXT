@@ -1,0 +1,56 @@
+const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const out=path.resolve('output/deployment-acceptance');fs.mkdirSync(out,{recursive:true});
+(async()=>{
+  const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
+  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],game=[];
+  const base=process.argv[2];
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('request',r=>{if(/\/api\/(connect|capture|playback|replay\/open)/.test(r.url()))game.push(r.url());});
+  try{
+    await page.goto(base);await page.waitForFunction(()=>state.loaded&&state.samples.length>1&&document.body.dataset.appReady==='true');
+    assert.equal(await page.locator('.tb-brand .brand-next').innerText(),'NEXT');
+    for(const id of ['connectButton','disconnectButton','openOverlay','playProjectReplay','captureButton','liveControls'])
+      assert.equal(await page.locator('#'+id).isVisible(),false,id+' must be hidden');
+    const denied=await page.request.post(base+'/api/connect',{data:{}});assert.equal(denied.status(),400);
+    const status=await(await page.request.get(base+'/api/state')).json();assert.equal(status.capabilities.game_write,false);
+    await page.screenshot({path:path.join(out,'next-workbench.png')});
+    await page.locator('#settingsButton').click();await page.waitForFunction(()=>applicationSettings&&!settingsLoading);
+    assert.equal(await page.locator('#startupSoundSection').isVisible(),false);
+    await page.locator('#settingsControlsTab').click();assert.equal(await page.locator('[aria-labelledby=hotkeyTitle]').isVisible(),false);
+    await page.locator('#settingsUpdatesTab').click();await page.waitForFunction(()=>document.getElementById('deploymentVersion').textContent!=='—');
+    const panel=page.locator('#settingsUpdatesPanel');assert.equal(await panel.isVisible(),true);
+    assert.doesNotMatch(await panel.innerText(),/pro|hook|授权|激活/i);
+    await page.keyboard.press('Control+s');assert.equal(await panel.isVisible(),true);
+    await page.locator('#deploymentExport').click();await page.waitForFunction(()=>document.getElementById('deploymentResult').textContent==='已取消导出。');
+    await page.locator('#deploymentExport').click();await page.waitForFunction(()=>document.getElementById('deploymentResult').textContent.startsWith('配置已导出'));
+    await page.locator('#deploymentChoose').click();await page.waitForFunction(()=>document.getElementById('deploymentResult').classList.contains('error'));
+    assert.equal(await page.locator('.tb-brand .brand-next').innerText(),'NEXT');
+    assert.equal(await page.locator('#deploymentInstall').isEnabled(),false);
+    await page.locator('#deploymentChoose').click();await page.waitForFunction(()=>!document.getElementById('deploymentPreview').hidden);
+    assert.equal(await page.locator('.tb-brand .brand-next').innerText(),'NEXT');
+    await page.screenshot({path:path.join(out,'package-ready.png')});
+    const savedProject=(await(await page.request.get(base+'/api/state')).json()).project;
+    await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded'}),page.locator('#deploymentInstall').click()]);
+    assert.match(await page.locator('html').getAttribute('data-pro-intro'),/^[0-9a-f]{32}$/);
+    await page.waitForFunction(()=>document.body.dataset.appReady==='true');
+    assert.deepEqual((await(await page.request.get(base+'/api/state')).json()).project,savedProject);
+    assert.equal(await page.locator('.tb-brand .brand-next').innerText(),'Pro');
+    assert.equal(await page.locator('.brand-pro').evaluate(e=>getComputedStyle(e).color),'rgb(230, 90, 180)');
+    await page.locator('#settingsButton').click();await page.waitForFunction(()=>applicationSettings&&!settingsLoading);
+    await page.locator('#settingsUpdatesTab').click();
+    assert.doesNotMatch(await panel.innerText(),/pro|hook|授权|激活/i);
+    await page.screenshot({path:path.join(out,'package-installed.png')});
+    await page.locator('#settingsGeneralTab').click();
+    assert.equal(await page.locator('#startupSoundSection').isVisible(),true);
+    await page.locator('#settingsBack').click();
+    for(const id of ['connectButton','openOverlay','captureButton','liveControls'])assert.equal(await page.locator('#'+id).isVisible(),true,id+' must appear');
+    await page.screenshot({path:path.join(out,'pro-workbench.png')});
+    await page.waitForFunction(async()=>!(/data-pro-intro="[0-9a-f]{32}"/.test(await(await fetch('/')).text())));
+    await page.reload();await page.waitForFunction(()=>state.loaded&&document.body.dataset.appReady==='true');
+    assert.equal(await page.locator('html').getAttribute('data-pro-intro'),'');
+    assert.equal((await(await page.request.get(base+'/api/state')).json()).capabilities.game_write,true);
+    assert.deepEqual(errors,[]);assert.deepEqual(game,[]);
+    const result={default_hidden:true,invalid_rejected:true,export:true,encrypted_import:true,title_color:true,automaticReload:true,firstIntro:true,dailyIntroNotRepeated:true,projectPreserved:true,errors};
+    fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+  }finally{await browser.close();}
+})().catch(error=>{console.error(error);process.exit(1);});

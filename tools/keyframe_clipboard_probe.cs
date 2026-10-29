@@ -94,6 +94,19 @@ public static class KeyframeClipboardProbe {
       await second.CoreWebView2.ExecuteScriptAsync("editor.scroll.focus();true");
       await Key(second.CoreWebView2,"v",86);
       await Assert(second.CoreWebView2,"editor.doc.tracks.x.some(k=>k.time_sec===20 && k.value===17) && editor.doc.tracks.y.some(k=>k.time_sec===24 && k.value===27) && changes.length===2 && !notices.length","native Ctrl+C/V repeated keyframe paste");
+      await second.CoreWebView2.ExecuteScriptAsync("editor.updatePlayhead(30);document.getElementById('workbenchButton').focus();true");
+      clipboardSequence=GetClipboardSequenceNumber();
+      await Key(second.CoreWebView2,"c",67);
+      TrackClipboard(clipboardSequence);
+      await second.CoreWebView2.ExecuteScriptAsync("document.getElementById('workbenchRange').focus();true");
+      await Key(second.CoreWebView2,"v",86);
+      await Assert(second.CoreWebView2,"editor.doc.tracks.x.some(k=>k.time_sec===30 && k.value===17) && editor.doc.tracks.y.some(k=>k.time_sec===34 && k.value===27) && changes.length===3 && !notices.length","native clipboard with other workbench button and range focus");
+      await second.CoreWebView2.ExecuteScriptAsync("editor.updatePlayhead(40);document.activeElement.blur();true");
+      clipboardSequence=GetClipboardSequenceNumber();
+      await Key(second.CoreWebView2,"c",67);
+      TrackClipboard(clipboardSequence);
+      await Key(second.CoreWebView2,"v",86);
+      await Assert(second.CoreWebView2,"document.activeElement===document.body && editor.doc.tracks.x.some(k=>k.time_sec===40 && k.value===17) && editor.doc.tracks.y.some(k=>k.time_sec===44 && k.value===27) && changes.length===4 && !notices.length","native clipboard with BODY focus");
       clipboardSequence=GetClipboardSequenceNumber();
       await first.CoreWebView2.ExecuteScriptAsync("document.getElementById('plain').focus();document.getElementById('plain').select();document.execCommand('copy');true");
       TrackClipboard(clipboardSequence);
@@ -102,7 +115,7 @@ public static class KeyframeClipboardProbe {
       Checks.Add("ordinary native input copy remains unchanged");
       await second.CoreWebView2.ExecuteScriptAsync("document.getElementById('plain').value='';document.getElementById('plain').focus();true");
       await Key(second.CoreWebView2,"v",86);
-      await Assert(second.CoreWebView2,"document.getElementById('plain').value==='BlitzCamera isolated native input' && changes.length===2 && !notices.length","ordinary native input paste remains unchanged");
+      await Assert(second.CoreWebView2,"document.getElementById('plain').value==='BlitzCamera isolated native input' && changes.length===4 && !notices.length","ordinary native input paste remains unchanged");
     }finally{first.Dispose();second.Dispose();window.Close();}
   }
   static async Task Navigate(CoreWebView2 web,string url){

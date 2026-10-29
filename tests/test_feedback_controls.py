@@ -16,7 +16,8 @@ from blitzcam.channels import track_controls
 from blitzcam.editor_state import editor_state_path
 from blitzcam.project import atomic_json, controls, validate_project
 from blitzcam.replay_timeline import file_timeline
-from blitzcam.server import Workstation, make_handler
+from blitzcam.server import make_handler
+from tests.fixtures.game_workstation import Workstation
 from tests.test_replay_events import arena_payload, data_with_events
 
 
@@ -214,10 +215,10 @@ class FeedbackControlsTests(unittest.TestCase):
         self.request('/api/ui/editor',{'project_path':str(self.app.project_path),'value':self.editor_value(30.)})
         before=self.stable()
         real_atomic=atomic_json
-        def fail_project(path,value):
+        def fail_project(path,value,**kwargs):
             if Path(path)==self.app.project_path:raise OSError('模拟项目保存失败')
-            return real_atomic(path,value)
-        with patch('blitzcam.server.atomic_json',side_effect=fail_project):
+            return real_atomic(path,value,**kwargs)
+        with patch('blitzcam.project.atomic_json',side_effect=fail_project):
             self.request('/api/ui/editor',{'project_path':str(self.app.project_path),
                          'value':self.editor_value(20.),'draft':self.draft((1.,20.,40.)),
                          'expected_revision':self.app.project_revision},status=400)
@@ -228,10 +229,10 @@ class FeedbackControlsTests(unittest.TestCase):
         self.session(20.)
         before=self.stable()
         real_atomic=atomic_json
-        def fail_project(path,value):
+        def fail_project(path,value,**kwargs):
             if Path(path)==self.app.project_path:raise OSError('模拟项目保存失败')
-            return real_atomic(path,value)
-        with patch('blitzcam.server.atomic_json',side_effect=fail_project):
+            return real_atomic(path,value,**kwargs)
+        with patch('blitzcam.project.atomic_json',side_effect=fail_project):
             for route in ('/api/capture/hotkey','/api/project/new'):
                 with self.subTest(route=route):
                     self.request(route,{},status=400)

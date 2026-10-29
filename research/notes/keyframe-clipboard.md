@@ -27,4 +27,4 @@ Adobe 说明最早所选关键帧粘贴到当前时间，其余保持间隔，�
 - `python -X utf8 -B -m tools.test_keyframe_clipboard_native`：原生 WebView2 双窗口验收通过。禁用浏览器加速键及拒绝权限时，工具栏复制、Ctrl+C/V、自定义剪贴板数据及跨窗口粘贴仍正常，输入框文字复制粘贴保留。修正原生事件落在 BODY 时的编辑器焦点识别；验收结束恢复原系统剪贴板。
 - 原有工作台完整界面、速度编辑器及工作区拖动验收均通过；拖动仍保留撤销、暂停预览、固定拍摄标尺及保存重载行为。
 
-截图及报告在 `output/keyframe-clipboard-acceptance`、`output/keyframe-clipboard-app-acceptance`、`output/keyframe-clipboard-native-acceptance`。均使用独立合成数据，不连接游戏、不加载 Hook。原生验收仅编译临时探针，正式宿主及 0.9.4 便携包未改。
+截图及报告在 `output/archive/2026-10-27/verification/keyframe-clipboard-acceptance`、`output/archive/2026-10-27/verification/keyframe-clipboard-app-acceptance`、`output/archive/2026-10-27/verification/keyframe-clipboard-native-acceptance`。均使用独立合成数据，不连接游戏、不加载 Hook。原生验收仅编译临时探针，正式宿主及 0.9.4 便携包未改。

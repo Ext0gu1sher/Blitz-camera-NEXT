@@ -16,6 +16,6 @@
 
 - `python -m unittest tests.test_replay_preview tests.test_server`：29 项通过，包括装配选择、前后扇区、过渡角、中文昵称、旧回放缺少装配编号，以及 7 组车体倾斜 / 炮塔横转 / 炮管俯仰组合和反复跳转。
 - `python -m tools.verify_replay_aim --project <项目.json>`：使用项目副本及隔离服务，调用实际 Worker、WASM、HTTP 参数接口、模型缓存及浏览器渲染。对比原先无锚定解析，检查所有车辆俯仰数据发生变化、最终炮口方向与解析姿态一致，前后拖动不累积旋转。
-- 本地 Kranvagn、Maus、FVE Defender 三份回放共 35 条车辆记录；验证结果与修复前后同视角截图存放于 `output/replay-aim-acceptance/`。这些输出含本地回放数据，不进入版本库。
+- 本地 Kranvagn、Maus、FVE Defender 三份回放共 35 条车辆记录；验证结果与修复前后同视角截图存放于 `output/archive/2026-10-27/verification/replay-aim-acceptance/`。这些输出含本地回放数据，不进入版本库。
 
 验证没有连接或启动游戏，没有改写原项目、回放或发布包。此验证覆盖离线解析与实际渲染；未将画面与游戏内同一时刻逐帧叠图比对。

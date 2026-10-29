@@ -17,7 +17,8 @@ static int clock_guard(void){
 }
 static int validate_clock_config(void){
  Config*c=&g_shared.cfg;
- if(c->replay_mode>2||c->camera_clock>1||c->speed_smooth>1||c->speed_count<2||c->speed_count>64||!isfinite(c->play_seconds)||c->play_seconds<.5||c->play_seconds>120||!isfinite(c->initial_rate)||c->initial_rate<=0)return 0;
+ /* A 120 s replay slice at 1/16x takes 1920 s, with no additional path points. */
+ if(c->replay_mode>2||c->camera_clock>1||c->speed_smooth>1||c->speed_count<2||c->speed_count>64||!isfinite(c->play_seconds)||c->play_seconds<.5||c->play_seconds>1920||!isfinite(c->initial_rate)||c->initial_rate<=0)return 0;
  /* Work in/out points select a slice of the authored schedule. They may also
     extend before/after it, where endpoint rates are held constant. */
  if(!isfinite(c->schedule_seconds)||c->schedule_seconds<=0||c->schedule_seconds>57600||!isfinite(c->schedule_offset)||fabs(c->schedule_offset)>57600)return 0;

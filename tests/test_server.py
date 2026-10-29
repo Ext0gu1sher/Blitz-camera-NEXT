@@ -9,7 +9,8 @@ import urllib.error
 from unittest.mock import patch, Mock
 from http.server import ThreadingHTTPServer
 
-from blitzcam.server import Workstation, make_handler
+from blitzcam.server import make_handler
+from tests.fixtures.game_workstation import Workstation
 from blitzcam.pose import quaternion_from_angles
 from tests.fixtures.replay_data import replay_data
 

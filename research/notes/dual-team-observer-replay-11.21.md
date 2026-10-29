@@ -6,7 +6,7 @@
 
 用户已确认：双方 14 辆参赛车辆持续可见并正常移动，没有额外虚拟车；第二版修复红方持续卡顿；中央敌人方向箭头、右侧弹药和消耗品栏均隐藏，赛事血量及头顶标记正常。
 
-当前实验文件为 `output/dual-replay-trial-20261025/tick-v2/dual-team-observer-tick-v2.wotbreplay`，SHA-256 `8381de0f2474ed79804aeae31e11f0d24a39df42f8d7204213874fe36f8056df`。界面抑制及虚拟车隐藏属于当前场景的一次原生操作，重新加载或重建场景后需要重新应用。尚未接入正式工作站。
+当前实验文件为 `output/archive/2026-10-27/research/dual-replay-trial-20261025/tick-v2/dual-team-observer-tick-v2.wotbreplay`，SHA-256 `8381de0f2474ed79804aeae31e11f0d24a39df42f8d7204213874fe36f8056df`。界面抑制及虚拟车隐藏属于当前场景的一次原生操作，重新加载或重建场景后需要重新应用。尚未接入正式工作站。
 
 ## 原始材料与合并范围
 
@@ -65,8 +65,8 @@ v4 在上述 9 个控件上使用原生 `DAVA::UIOpacityComponent`，设置 opac
 打开第二版，切自由镜头并暂停后：
 
 ```powershell
-python -X utf8 -B research/scripts/run_observer_visibility_trial.py --action probe --clean --hide-ghost --suppress-personal --manifest output/dual-replay-trial-20261025/tick-v2/observer-manifest.json --url http://127.0.0.1:58123
-python -X utf8 -B research/scripts/run_observer_visibility_trial.py --action show --clean --hide-ghost --suppress-personal --manifest output/dual-replay-trial-20261025/tick-v2/observer-manifest.json --url http://127.0.0.1:58123
+python -X utf8 -B research/scripts/run_observer_visibility_trial.py --action probe --clean --hide-ghost --suppress-personal --manifest output/archive/2026-10-27/research/dual-replay-trial-20261025/tick-v2/observer-manifest.json --url http://127.0.0.1:58123
+python -X utf8 -B research/scripts/run_observer_visibility_trial.py --action show --clean --hide-ghost --suppress-personal --manifest output/archive/2026-10-27/research/dual-replay-trial-20261025/tick-v2/observer-manifest.json --url http://127.0.0.1:58123
 ```
 
 恢复时传 `--action restore --restore-report <本次 show/report.json>`、同一 manifest 和服务地址。对象或场景改变时拒绝恢复旧地址。合并/校验入口为 `make_dual_tick_trial.py`、`make_dual_observer_trial.py`、`decode_dual_replay.mjs`、`verify_dual_tick_trial.py`。

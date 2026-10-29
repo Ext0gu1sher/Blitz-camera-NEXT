@@ -15,7 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    with tempfile.TemporaryDirectory(dir=ROOT/'output') as folder, patch('blitzcam.server.OUTPUT', Path(folder)):
+    with tempfile.TemporaryDirectory(dir=ROOT/'output') as folder, \
+            patch.dict(os.environ, {'BLITZCAM_PROFILE_ROOT': str(Path(folder)/'account')}), \
+            patch('blitzcam.server.OUTPUT', Path(folder)):
         root = Path(folder).resolve()
         first, second = root/'项目目录一', root/'项目目录二'
         save_settings(root, {'project_directory': str(first)})

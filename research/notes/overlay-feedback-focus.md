@@ -11,13 +11,13 @@
 - `python -X utf8 -B -m tools.test_desktop_controls`：原生前台事件订阅可用；真实 HWND 显隐覆盖模拟游戏前后台、各小窗交互、最小化及恢复、手动隐藏、布局保留、重复显隐与折叠、全局快捷键冲突及无小窗记录。实际 WebView 消息验证成功和错误仅到达来源小窗，记录前仍保存工作台草稿。
 - `python -X utf8 -B -m unittest tests.test_desktop`：5 项启动、校验与关闭测试通过。
 
-原生验证使用独立临时项目、屏幕外模拟窗口与合成摄像机，不连接游戏、不切换用户的前台窗口。受限执行环境下新旧外壳的 WebView 均在启动时退出；在受限环境外执行相同隔离测试通过。报告见 `output/desktop-controls-acceptance/result.json`。
+原生验证使用独立临时项目、屏幕外模拟窗口与合成摄像机，不连接游戏、不切换用户的前台窗口。受限执行环境下新旧外壳的 WebView 均在启动时退出；在受限环境外执行相同隔离测试通过。报告见 `output/archive/2026-10-27/verification/desktop-controls-acceptance/result.json`。
 
 ## 断开后重连的旧错误提示
 
 后台读取因回放或相机引用变化而停止时，回放状态变为 invalidated。之前重连只重新核对 launched 状态，因此相机虽连接成功，旧 invalidated 状态仍保留，且不同文件也绕过了本次启动来源的重连核对。现在这两种状态都重新检查来源：核对通过后恢复 launched / verified 并更新消息；来源无法读取时显示本次“文件未核实”提示；实际文件或安装位置不匹配仍拒绝连接。小窗和工作台均从新状态刷新，不靠隐藏错误文本处理。
 
-新增三项服务端回归覆盖上述重连结果，修复前均复现失败。tools/test_reconnect_status_ui.py 使用实际连接接口及模拟相机检查连接小窗：旧错误及红色样式清除、手动断开不复发、再次重连及轮询保持正常。相关回放启动、准备、服务端和启动参数测试通过。报告：output/reconnect-status-acceptance/result.json。本次未重新打包。
+新增三项服务端回归覆盖上述重连结果，修复前均复现失败。tools/test_reconnect_status_ui.py 使用实际连接接口及模拟相机检查连接小窗：旧错误及红色样式清除、手动断开不复发、再次重连及轮询保持正常。相关回放启动、准备、服务端和启动参数测试通过。报告：output/archive/2026-10-27/verification/reconnect-status-acceptance/result.json。本次未重新打包。
 
 ## 跟随刷新与焦点过渡
 

@@ -14,10 +14,10 @@ Cinema 是游戏内置的另一种自由镜头控制器，和 Spectator 共享�
 
 原始输出：
 
-- `output/cinema-lab-research/creation-and-config.txt`
-- `output/cinema-lab-research/controller-differences.txt`
-- `output/cinema-lab-research/mode-and-bounds.txt`
-- `output/cinema-lab-research/live-readonly.json`
+- `output/archive/2026-10-27/research/cinema-lab-research/creation-and-config.txt`
+- `output/archive/2026-10-27/research/cinema-lab-research/controller-differences.txt`
+- `output/archive/2026-10-27/research/cinema-lab-research/mode-and-bounds.txt`
+- `output/archive/2026-10-27/research/cinema-lab-research/live-readonly.json`
 
 静态反汇编只把磁盘 EXE 数据映射到分析程序自身的不可执行内存；DbgEng 只附加自身。运行时使用项目已有 ReadOnlyMemory 和 CameraSession，访问权限为查询和读取。
 

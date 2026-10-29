@@ -132,6 +132,7 @@ async function poll(force=false){
   if(model.polling||model.busy&&!force)return;model.polling=true;
   try{
     const data=await api("/api/state"),hash=JSON.stringify(data.project),changed=hash!==model.projectHash;
+    document.body.classList.toggle('edition-pro',data.edition==='pro');
     model.data=data;model.ready=true;
     if(!data.project){model.projectHash=hash;if(changed)loadPreview(hash);render();$('miniLiveStatus').textContent='请在工作台主页新建或打开项目。';return;}
     if(data.project.shooting_mode!=="camera_only"&&data.project.replay_timeline){const t=data.project.replay_timeline;$("pathDuration").value=Number((t.work_end_sec-t.work_start_sec).toFixed(6));}

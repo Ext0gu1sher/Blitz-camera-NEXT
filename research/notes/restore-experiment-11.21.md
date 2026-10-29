@@ -169,7 +169,7 @@ R2 验收与 R1 不同：第一个已识别的完整后继相机更新就要达�
 
 用户已明确要求恢复新保存的位置，并确认当前仍暂停、只向右平移、没有操作鼠标和滚轮。这是本次一次性位置修改的授权，不再要求重复确认。
 
-保存记录为 `output/captures/20261018T152922309882Z.json`。只读预检 `output/restore-r1-20261018-preflight/report.json` 读到 A→B 位移 `18.009103231360907` 世界单位，完整姿态差 `0.000058156965164257276°`，FOV 差为零；回放时间仍为 `23.61650562286377` 秒，同一进程、场景、控制器及相机链。主边界和额外位置调整区域检查通过。
+保存记录为 `output/captures/20261018T152922309882Z.json`。只读预检 `output/archive/2026-10-27/research/restore-r1-20261018-preflight/report.json` 读到 A→B 位移 `18.009103231360907` 世界单位，完整姿态差 `0.000058156965164257276°`，FOV 差为零；回放时间仍为 `23.61650562286377` 秒，同一进程、场景、控制器及相机链。主边界和额外位置调整区域检查通过。
 
 此前 `0.5–3` 为实验自定范围，并非已知客户端限制。依据用户这次明确授权的纯横移，在实际写入前为本次试验预定距离上限 **25 世界单位**，执行器仍默认上限 3，只有本次命令显式选择 25。位置误差 ≤0.01、姿态差 ≤0.05°、FOV 差 ≤0.01°、5 秒内到达、保持至少 3 秒且至少 150 个有效样本等验收标准不变；不在结果失败后放宽标准。
 
@@ -179,9 +179,9 @@ R2 验收与 R1 不同：第一个已识别的完整后继相机更新就要达�
 
 本次精确构建 `11.21.0.1235` / SHA-256 `5030ee4b9f6ec7db1c06efa2b92f9dd7243574be5d8d9578c118119318bc9608`。
 
-- 首次受限环境尝试通过全部只读预检，但 Windows `OpenProcess` 返回错误 5，未取得写入句柄，实际写入次数为零：`output/restore-r1-20261018-execution/report.json`。
+- 首次受限环境尝试通过全部只读预检，但 Windows `OpenProcess` 返回错误 5，未取得写入句柄，实际写入次数为零：`output/archive/2026-10-27/research/restore-r1-20261018-execution/report.json`。
 - 随后通过环境权限审批，在用户同一项明确授权内重新预检，完成唯一一次 12 字节目标 XYZ 写入；进程创建身份和相机实例均未改变。未启用调试特权、注入、Hook、远程调用、线程暂停、保护属性修改，也没有修改游戏文件。
-- 实际报告：`output/restore-r1-20261018-permission/report.json`；读侧时序：同目录 `after.jsonl`；汇总：同目录 `analysis.json`。报告保留完整写前检查、旧/新载荷和系统写入结果。
+- 实际报告：`output/archive/2026-10-27/research/restore-r1-20261018-permission/report.json`；读侧时序：同目录 `after.jsonl`；汇总：同目录 `analysis.json`。报告保留完整写前检查、旧/新载荷和系统写入结果。
 
 | 项目 | 读到的结果 |
 |---|---|
@@ -286,7 +286,7 @@ R3-C 三段提交前整体复核，拟固定顺序为目标角→XYZ 目标→FO
 - **已建立针对已追踪滚轮 FOV 写入链的保守只读空闲判据：**同时检查注册容器、更新容器、链式后继、字段绑定、待执行任务、移出队列后正在执行的任务，以及已预留但尚未完成的任务 ID。不能用 `+0x134` 非空、一个 playing 位、任务队列为空、当前/目标 FOV 相等，替代这些检查。
 - **仍未验证：**朝向/FOV 的外部单次写入恢复、非零 roll 的读写关系、组合恢复、取消旧动画与新动画重叠的运行过程，以及游戏线程内原子提交。只读空闲是有边界的观察结果，不能作为外部异步写入的原子性证明；脚本始终输出 `write_ready=false`。
 
-只读脚本为 [probe_pose_fov_1121_readonly.py](../scripts/probe_pose_fov_1121_readonly.py)，离线汇总为 [analyze_pose_fov_1121.py](../scripts/analyze_pose_fov_1121.py)。未接入原有工作台或写入器，也没有修改发行配置。证据清单、大小和 SHA-256 在 [manifest.json](../../output/pose-fov-idle-1121/manifest.json)。
+只读脚本为 [probe_pose_fov_1121_readonly.py](../scripts/probe_pose_fov_1121_readonly.py)，离线汇总为 [analyze_pose_fov_1121.py](../scripts/analyze_pose_fov_1121.py)。未接入原有工作台或写入器，也没有修改发行配置。证据清单、大小和 SHA-256 在 [manifest.json](../../output/archive/2026-10-27/research/pose-fov-idle-1121/manifest.json)。
 
 ### 8.2 yaw/pitch 与最终相机的只读核对
 
@@ -361,16 +361,16 @@ FreeCamera 缩放为 `1.2668826580047607`；水平 FOV 由约 `68.411675°→74.
 执行只读复核命令（输出目录必须是新的；不会操作游戏）：
 
 ```powershell
-python -X utf8 -B research/scripts/probe_pose_fov_1121_readonly.py --out output/pose-fov-idle-1121/new-check --seconds 4 --hz 100
+python -X utf8 -B research/scripts/probe_pose_fov_1121_readonly.py --out output/archive/2026-10-27/research/pose-fov-idle-1121/new-check --seconds 4 --hz 100
 ```
 
 ### 8.6 本轮验收与下一步
 
 | 采集/检查 | 结果与证据 |
 |---|---|
-| 90 秒转向与正反滚轮 | 8717 有效、2 次因相机/矩阵不一致丢弃；位置改变量 0、回放时刻唯一；[analysis.json](../../output/pose-fov-idle-1121/drag-zoom/analysis.json)，原始 `samples.jsonl` 在同目录 |
-| 停止操作后的独立 3 秒复核 | 291 有效、0 丢弃，无相关动画，输入为零；[analysis.json](../../output/pose-fov-idle-1121/final-stable/analysis.json) |
-| 加入相机前后双侧结构复核后的 4 秒复核 | 387 有效、0 丢弃，跨度 3.99019 秒；全程观察为空闲；[analysis.json](../../output/pose-fov-idle-1121/bracketed-stable/analysis.json) |
+| 90 秒转向与正反滚轮 | 8717 有效、2 次因相机/矩阵不一致丢弃；位置改变量 0、回放时刻唯一；[analysis.json](../../output/archive/2026-10-27/research/pose-fov-idle-1121/drag-zoom/analysis.json)，原始 `samples.jsonl` 在同目录 |
+| 停止操作后的独立 3 秒复核 | 291 有效、0 丢弃，无相关动画，输入为零；[analysis.json](../../output/archive/2026-10-27/research/pose-fov-idle-1121/final-stable/analysis.json) |
+| 加入相机前后双侧结构复核后的 4 秒复核 | 387 有效、0 丢弃，跨度 3.99019 秒；全程观察为空闲；[analysis.json](../../output/archive/2026-10-27/research/pose-fov-idle-1121/bracketed-stable/analysis.json) |
 | 空闲检查离线测试 | [test_fov_observation.py](../../tests/test_fov_observation.py) 共 15 项通过：覆盖停止但仍注册、owner 清零但 setter 仍绑定、等待后继、已预留未入队、出队后仍执行、任务服务关闭、坏链/坏队列/不可读对象，以及捕获前后结构变化。模拟测试不能替代运行时生命周期间隙实测 |
 | 本轮游戏内存写入 | 0；未调用此前 R1 写入器 |
 
@@ -415,13 +415,13 @@ python -X utf8 -B research/scripts/probe_pose_fov_1121_readonly.py --out output/
 
 ### 9.3 证据与限制
 
-- [参考完整捕获](../../output/restore-yaw-20261019/reference-stable/start.json)，同目录为 3 秒稳定采集。
-- [只读 dry run 报告](../../output/restore-yaw-20261019/dry-run/report.json)。
-- [受限权限停止记录](../../output/restore-yaw-20261019/execution/report.json)：实际写入次数 0。
-- [实际提交与采样报告](../../output/restore-yaw-20261019/execution-authorized/report.json)，同目录 `before.jsonl`、`after.jsonl` 保留原始快照和时间序列。
-- [持久化唯一尝试记录](../../output/restore-yaw-20261019/yaw-write-attempt.json)。
-- [画面核对与证据清单](../../output/restore-yaw-20261019/verification.json)，包含文件 SHA-256、只读采样矩阵残差汇总及助手的画面核对；采样器原报告的 `visual_match_verified=false` 只表示该采样器自身不判断截图。
-- [参考画面 A](../../output/restore-yaw-20261019/reference.jpg)、[转开后 B](../../output/restore-yaw-20261019/displaced.jpg)、[恢复后](../../output/restore-yaw-20261019/restored.jpg)。动态涂装、粒子和鼠标指针可能不同，不主张像素完全一致。
+- [参考完整捕获](../../output/archive/2026-10-27/research/restore-yaw-20261019/reference-stable/start.json)，同目录为 3 秒稳定采集。
+- [只读 dry run 报告](../../output/archive/2026-10-27/research/restore-yaw-20261019/dry-run/report.json)。
+- [受限权限停止记录](../../output/archive/2026-10-27/research/restore-yaw-20261019/execution/report.json)：实际写入次数 0。
+- [实际提交与采样报告](../../output/archive/2026-10-27/research/restore-yaw-20261019/execution-authorized/report.json)，同目录 `before.jsonl`、`after.jsonl` 保留原始快照和时间序列。
+- [持久化唯一尝试记录](../../output/archive/2026-10-27/research/restore-yaw-20261019/yaw-write-attempt.json)。
+- [画面核对与证据清单](../../output/archive/2026-10-27/research/restore-yaw-20261019/verification.json)，包含文件 SHA-256、只读采样矩阵残差汇总及助手的画面核对；采样器原报告的 `visual_match_verified=false` 只表示该采样器自身不判断截图。
+- [参考画面 A](../../output/archive/2026-10-27/research/restore-yaw-20261019/reference.jpg)、[转开后 B](../../output/archive/2026-10-27/research/restore-yaw-20261019/displaced.jpg)、[恢复后](../../output/archive/2026-10-27/research/restore-yaw-20261019/restored.jpg)。动态涂装、粒子和鼠标指针可能不同，不主张像素完全一致。
 
 外部采样不是引擎帧栅栏；没有录像或逐帧呈现检查，不能据此宣称整个转回过程零抖动、同帧原子提交。引擎活动根仍未单独确认，此次通过已核对的对象关系、回放状态、矩阵读数及实际画面相互印证。没有测试跨圈、极端俯仰、非零 roll、播放/变速、重开回放或客户端更新后的恢复，也未把组合恢复接入工作台。
 
@@ -463,19 +463,19 @@ computer use 只在画面中心发送一次滚轮增量 `+120` 建立 B，没有
 
 执行器 [restore_fov_1121_once.py](../scripts/restore_fov_1121_once.py) 默认 dry run，独立于工作台。唯一写入范围固定为上述 8 字节，检查精确构建/进程身份/唯一回放相机链/BattleController 更新链、暂停且无跳转、位置角度与 view 不变、原生角度停稳、FOV 停稳、已知动画/任务空闲与现有私有 RW 内存范围。独占持久化预算文件在调用前创建；失败、部分写入或异常都禁止第二次调用。没有调用之前的位置或朝向写入器。沿用此前同进程已确认的权限条件，使用获准的终端权限执行此次已授权实验，没有额外的受限权限写入尝试。
 
-原始执行源文件已冻结在 [executed-source.py](../../output/restore-fov-20261019/execution-authorized/executed-source.py)，SHA-256 `a1befdb406465cd8570ee734e81a7e83d2124836a815346120ecbc86403a6138`。它仅供审计，不应从输出目录直接运行。实际执行前 15 项离线检查通过。
+原始执行源文件已冻结在 [executed-source.py](../../output/archive/2026-10-27/research/restore-fov-20261019/execution-authorized/executed-source.py)，SHA-256 `a1befdb406465cd8570ee734e81a7e83d2124836a815346120ecbc86403a6138`。它仅供审计，不应从输出目录直接运行。实际执行前 15 项离线检查通过。
 
 首次中断后，只修改了**写后观察逻辑**：对已核对为不变的身份/XYZ/姿态/目标字段，若仅接口 FOV 与投影不一致，则记录失败快照并作为不一致样本丢弃，继续使用原始超时；持续不一致不能判通过。位置/朝向改变、目标被覆盖、输入、动画或身份异常仍立即停止；写前一致性检查没有放宽。新增中间态、持续不一致、伴随位置变化的模拟测试，当前 [test_restore_fov_once.py](../../tests/test_restore_fov_once.py) 共 **18 项通过**。修正后的观察器**没有再次用于真实写入实验**，不反向改变本次原报告。
 
 证据：
 
-- [激活前状态](../../output/restore-fov-20261019/before-focus/start.json)、[参考完整状态 A](../../output/restore-fov-20261019/reference-stable/start.json)，同目录保留稳定采样。
-- [正常滚轮采集](../../output/restore-fov-20261019/wheel-observation/summary.json)，同目录保留 `samples.jsonl`。
-- [只读 dry run](../../output/restore-fov-20261019/dry-run/report.json)。
-- [唯一实际提交及原始失败报告](../../output/restore-fov-20261019/execution-authorized/report.json)、[持久化写入预算](../../output/restore-fov-20261019/fov-write-attempt.json)。
-- [后续只读复核与 A 比较](../../output/restore-fov-20261019/postwrite-readonly/comparison.json)，同目录保留 4 秒完整采样；该采集不含任何游戏写入。
-- [证据清单与画面核对](../../output/restore-fov-20261019/verification.json)，区分 `stable_fov_restore_confirmed=true` 与 `original_five_second_arrival_and_continuous_hold_verified=false`。
-- [参考 A](../../output/restore-fov-20261019/reference.jpg)、[FOV 变宽后 B](../../output/restore-fov-20261019/changed.jpg)、[恢复后](../../output/restore-fov-20261019/restored.jpg)。
+- [激活前状态](../../output/archive/2026-10-27/research/restore-fov-20261019/before-focus/start.json)、[参考完整状态 A](../../output/archive/2026-10-27/research/restore-fov-20261019/reference-stable/start.json)，同目录保留稳定采样。
+- [正常滚轮采集](../../output/archive/2026-10-27/research/restore-fov-20261019/wheel-observation/summary.json)，同目录保留 `samples.jsonl`。
+- [只读 dry run](../../output/archive/2026-10-27/research/restore-fov-20261019/dry-run/report.json)。
+- [唯一实际提交及原始失败报告](../../output/archive/2026-10-27/research/restore-fov-20261019/execution-authorized/report.json)、[持久化写入预算](../../output/archive/2026-10-27/research/restore-fov-20261019/fov-write-attempt.json)。
+- [后续只读复核与 A 比较](../../output/archive/2026-10-27/research/restore-fov-20261019/postwrite-readonly/comparison.json)，同目录保留 4 秒完整采样；该采集不含任何游戏写入。
+- [证据清单与画面核对](../../output/archive/2026-10-27/research/restore-fov-20261019/verification.json)，区分 `stable_fov_restore_confirmed=true` 与 `original_five_second_arrival_and_continuous_hold_verified=false`。
+- [参考 A](../../output/archive/2026-10-27/research/restore-fov-20261019/reference.jpg)、[FOV 变宽后 B](../../output/archive/2026-10-27/research/restore-fov-20261019/changed.jpg)、[恢复后](../../output/archive/2026-10-27/research/restore-fov-20261019/restored.jpg)。
 
 结束时画面回到本轮 A 的 FOV，位置与朝向未通过程序改变，回放仍暂停。采集和写入进程均已结束，没有持续接管。下一轮应先用修正后的观察器完成新的独立 R3-F 时序验收，再讨论组合恢复；本轮不能视为组合状态、非零 roll、播放同步或跨重开重复性已经通过。
 
@@ -485,7 +485,7 @@ computer use 只在画面中心发送一次滚轮增量 `+120` 建立 B，没有
 
 ### 11.1 A、移开与实际 B
 
-本轮单独保存新的参考 A：[完整状态](../../output/restore-combined-20261019/reference-stable/start.json)、[画面](../../output/restore-combined-20261019/reference.jpg)。没有覆盖用户工作台的机位。参考 XYZ 为 `[-145.14146423339844,-132.67930603027344,31.4066219329834]`，原生目标 yaw/pitch 为 `[1063.421142578125,0.8907768130302429]`；接口 FOV `54`，实际水平 FOV `68.41167535035929°`。累计原生 yaw 与画面世界 yaw 不是同一角度约定，不能直接互换。
+本轮单独保存新的参考 A：[完整状态](../../output/archive/2026-10-27/research/restore-combined-20261019/reference-stable/start.json)、[画面](../../output/archive/2026-10-27/research/restore-combined-20261019/reference.jpg)。没有覆盖用户工作台的机位。参考 XYZ 为 `[-145.14146423339844,-132.67930603027344,31.4066219329834]`，原生目标 yaw/pitch 为 `[1063.421142578125,0.8907768130302429]`；接口 FOV `54`，实际水平 FOV `68.41167535035929°`。累计原生 yaw 与画面世界 yaw 不是同一角度约定，不能直接互换。
 
 正常瞬时 D 与屏幕键盘尝试没有产生位移。已向用户说明后，改用之前验证的位置控制作准备：仅将目标 XYZ 侧移 5 个世界单位，写入一次 12 字节；随后用游戏的正常鼠标右键操作转向、一次中心滚轮 `+120` 变焦。准备目标明确标记 `planned_not_captured=true`，不是把计算坐标冒充实测 B。准备写入后约 1.8845 秒进入 0.01 单位容差，并保持 150 个有效样本，位置准备成功。
 
@@ -521,9 +521,9 @@ computer use 只在画面中心发送一次滚轮增量 `+120` 建立 B，没有
 
 ### 11.3 画面证据与限制
 
-助手通过 computer use 确认可见上半画面的寺庙、山体、树和右侧岩石回到 A 的布局；[移开后](../../output/restore-combined-20261019/changed.jpg)、[恢复后](../../output/restore-combined-20261019/restored.jpg) 均有截图。屏幕键盘遮挡约 y=699 以下的中部区域，工具关闭未生效，因此 **整幅画面构图尚未完整核对**；没有用户人工确认或像素一致性声明。数值验收通过与局部画面核对分开记录，原采样报告的 `visual_match_verified=false` 不改写。
+助手通过 computer use 确认可见上半画面的寺庙、山体、树和右侧岩石回到 A 的布局；[移开后](../../output/archive/2026-10-27/research/restore-combined-20261019/changed.jpg)、[恢复后](../../output/archive/2026-10-27/research/restore-combined-20261019/restored.jpg) 均有截图。屏幕键盘遮挡约 y=699 以下的中部区域，工具关闭未生效，因此 **整幅画面构图尚未完整核对**；没有用户人工确认或像素一致性声明。数值验收通过与局部画面核对分开记录，原采样报告的 `visual_match_verified=false` 不改写。
 
-主要证据：[准备提交报告](../../output/restore-combined-20261019/prepare-execution/report.json)、[恢复 dry run](../../output/restore-combined-20261019/restore-dry-run/report.json)、[实际组合提交与时序](../../output/restore-combined-20261019/restore-execution/report.json)、同目录 `before.jsonl/after.jsonl`、[独立复核](../../output/restore-combined-20261019/postwrite-readonly/summary.json)、[汇总与文件哈希清单](../../output/restore-combined-20261019/verification.json)。执行源冻结在 [executed-source.py](../../output/restore-combined-20261019/executed-source.py)，仅供审计，不从输出目录运行。
+主要证据：[准备提交报告](../../output/archive/2026-10-27/research/restore-combined-20261019/prepare-execution/report.json)、[恢复 dry run](../../output/archive/2026-10-27/research/restore-combined-20261019/restore-dry-run/report.json)、[实际组合提交与时序](../../output/archive/2026-10-27/research/restore-combined-20261019/restore-execution/report.json)、同目录 `before.jsonl/after.jsonl`、[独立复核](../../output/archive/2026-10-27/research/restore-combined-20261019/postwrite-readonly/summary.json)、[汇总与文件哈希清单](../../output/archive/2026-10-27/research/restore-combined-20261019/verification.json)。执行源冻结在 [executed-source.py](../../output/archive/2026-10-27/research/restore-combined-20261019/executed-source.py)，仅供审计，不从输出目录运行。
 
 离线测试 [test_restore_combined_once.py](../../tests/test_restore_combined_once.py) **15 项通过**：覆盖三个固定字段的顺序与长度、单次预算、部分写入/异常立即停止、阶段间暂停或目标改变、内存页面边界、线段区域交叉、中间态丢弃及达标后反弹不通过。测试均为模拟，没有游戏写入。
 
@@ -533,7 +533,7 @@ computer use 只在画面中心发送一次滚轮增量 `+120` 建立 B，没有
 
 用户报告正在录制，手动建立本轮 A、移动位置和朝向，并改变 FOV，最后明确说明“位置动了一下 fov改了 你就按这个新的来吧”。本轮保留初始 A，以新的实际 B 为起点，没有再要求用户回到旧 B，也没有用程序准备位移。录像尚未提供；录制状态来自用户报告。
 
-参考 A 独立保存在 [完整状态](../../output/recorded-restore-20261019-1517/reference/start.json)，文件 SHA-256 为 `e4676be19dfbffc26220a8bb2d067edc1055a4eb798c480f2b5c368cebd61b78`。XYZ `[-142.4790496826172,-129.1035919189453,30.9177303314209]`，原生目标角 `[1046.4993896484375,5.253173828125]`，接口 FOV `54`、水平 FOV `68.41167535035929°`。参考稳定检查 290 个有效样本、0 丢样，约 2.993 秒内三个分量均无漂移。
+参考 A 独立保存在 [完整状态](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/reference/start.json)，文件 SHA-256 为 `e4676be19dfbffc26220a8bb2d067edc1055a4eb798c480f2b5c368cebd61b78`。XYZ `[-142.4790496826172,-129.1035919189453,30.9177303314209]`，原生目标角 `[1046.4993896484375,5.253173828125]`，接口 FOV `54`、水平 FOV `68.41167535035929°`。参考稳定检查 290 个有效样本、0 丢样，约 2.993 秒内三个分量均无漂移。
 
 正式恢复前 B 距 A `42.0117757073` 世界单位，四元数朝向差 `54.7443792514°`，原生 yaw/pitch 差分别 `53.5676269531° / 11.7336959839°`，水平 FOV 差 `12.6688187389°`。为覆盖用户已明确接受的这次 B，执行器新增显式单轮参数 `--max-distance 50 --max-yaw 60`；默认仍为 `25 / 45`，参数拒绝非有限值以及超过 `50 / 60` 的值。本次没有修改俯仰/FOV 范围、同一累计角周期、路径区域、两层零 roll、暂停时钟、输入释放及动画空闲等检查。17 项离线模拟测试通过，包括默认范围拒绝较大幅度、显式范围接受及硬上限仍生效。
 
@@ -550,7 +550,7 @@ computer use 只在画面中心发送一次滚轮增量 `+120` 建立 B，没有
 
 上述反馈仅记录为用户观察到构图大致恢复；助手尚未检查本轮录像，不能宣称像素一致或全程无抖动。数值恢复验收通过，视频验收待补。非零 roll、跨重开重复性、8 秒轨迹及播放同步仍不由本轮证明。执行器已退出，没有持续接管。
 
-证据：[只读检查](../../output/recorded-restore-20261019-1517/reference-check.json)、[dry run](../../output/recorded-restore-20261019-1517/restore-dry-run/report.json)、[正式执行及观测](../../output/recorded-restore-20261019-1517/restore-execution/report.json)、同目录 `before.jsonl/after.jsonl`、[独占写入预算](../../output/recorded-restore-20261019-1517/restore-write-budget.json)、[核验清单](../../output/recorded-restore-20261019-1517/verification.json)。执行源已冻结为 [executed-source.py](../../output/recorded-restore-20261019-1517/executed-source.py)，SHA-256 `37e4cf8ad6b1fd13337ea811ca99e33e828adcf51f48d1d3f5b1a76bc0635c06`，仅供审计，不从输出目录运行。
+证据：[只读检查](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/reference-check.json)、[dry run](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/restore-dry-run/report.json)、[正式执行及观测](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/restore-execution/report.json)、同目录 `before.jsonl/after.jsonl`、[独占写入预算](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/restore-write-budget.json)、[核验清单](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/verification.json)。执行源已冻结为 [executed-source.py](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/executed-source.py)，SHA-256 `37e4cf8ad6b1fd13337ea811ca99e33e828adcf51f48d1d3f5b1a76bc0635c06`，仅供审计，不从输出目录运行。
 
 ### 12.1 用户提供录像后的离线核对
 
@@ -566,7 +566,7 @@ ffprobe/PyAV 读到 H.264、1920×1080、60 fps 时间轴、15615 帧、时长 2
 
 本轮现在具备数值恢复及录像构图核对证据；原始运行报告保持不变，在独立核验清单中补充视频验收。仍不声明全程零抖动、非零 roll、跨重开重复性或播放同步通过。下一项应先设计保持朝向/FOV不变的暂停回放 8 秒位置轨迹，并处理原生平滑带来的跟随延迟；本轮未执行该实验。
 
-离线证据：[视频分析报告](../../output/recorded-restore-20261019-1517/video-review/review.json)、[A 与恢复后对照](../../output/recorded-restore-20261019-1517/video-review/a-restored-comparison.jpg)、[返回起始与收尾逐帧选图](../../output/recorded-restore-20261019-1517/video-review/motion-start-sheet.jpg)、[逐帧图像差异](../../output/recorded-restore-20261019-1517/video-review/video-frame-metrics.json)、[静态地标核对](../../output/recorded-restore-20261019-1517/video-review/landmark-comparison.json)。源视频 SHA-256 记录于分析报告，没有修改原视频。
+离线证据：[视频分析报告](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/video-review/review.json)、[A 与恢复后对照](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/video-review/a-restored-comparison.jpg)、[返回起始与收尾逐帧选图](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/video-review/motion-start-sheet.jpg)、[逐帧图像差异](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/video-review/video-frame-metrics.json)、[静态地标核对](../../output/archive/2026-10-27/research/recorded-restore-20261019-1517/video-review/landmark-comparison.json)。源视频 SHA-256 记录于分析报告，没有修改原视频。
 
 ## 13. 2026-10-19：原 A/B 的暂停回放组合轨迹
 
@@ -723,7 +723,7 @@ world_coverage = stored_step * shadow_resolution
 
 排查确认是本实验代码的调用声明错误：把 `0x00A7AEE0` 当作无栈实参函数，但实际尾部为 `ret 4`，且原生调用点先 `push 0`。少传一个参数会使栈不平衡，因此首轮的时间间隔错误不能当成游戏真正卡顿的证据。修正版按原生调用点传入额外的零值参数；其内部投影更新分支比较该参数的低字节。这只是核对的 ABI，不宣称恢复了官方函数名称或完整类型。位置与方向 setter 的 `ret 4`、更新包装入口的 `ret 4` 亦另行核对。
 
-原始失败报告及事件：[execution/report.json](../../output/hook-position-20261019/execution/report.json)、[ABI 纠正证据](../../output/hook-position-20261019/native-call-abi-correction.txt)。失败录像为 `C:\Users\Ext1nguisher\Videos\2026-10-19 17-29-41.mp4`。原版停止后的独立状态满足第二轮预检，未盲目续跑原轨迹。
+原始失败报告及事件：[execution/report.json](../../output/archive/2026-10-27/research/hook-position-20261019/execution/report.json)、[ABI 纠正证据](../../output/archive/2026-10-27/research/hook-position-20261019/native-call-abi-correction.txt)。失败录像为 `C:\Users\Ext1nguisher\Videos\2026-10-19 17-29-41.mp4`。原版停止后的独立状态满足第二轮预检，未盲目续跑原轨迹。
 
 修正版本地编译 DLL SHA-256 为 `2033c2ef831eab884412800170e45d8c0c3cb69af3501f11d37699b064601e57`，实际执行源码和二进制冻结在 `execution-v2/`。六项独立 x86 模拟进程测试通过，包括带参数的入口转发、路径端点、暂停检查、原生目标变化、心跳失联和投影变化中止；这些模拟测试不替代实际客户端验证。构建使用官方 Zig 0.15.2，来源与下载校验保存在 `tools/zig-0.15.2-provenance.json`；没有把下载的第三方模组或未知 DLL 加载进游戏。
 
@@ -744,11 +744,11 @@ world_coverage = stored_step * shadow_resolution
 
 这轮游戏回调约 35 次/秒，最大原生 dt 约 0.034652 秒，OBS 输出为 60 fps，两者不能混同。截图中 OBS 位于游戏前面，不能把本轮当作前台锁定 60 fps 的性能测试。
 
-原始数据：[执行报告](../../output/hook-position-20261019/execution-v2/report.json)、[每次回调记录](../../output/hook-position-20261019/execution-v2/events.jsonl)、[离线汇总](../../output/hook-position-20261019/execution-v2/analysis.json)、[独立退出核对](../../output/hook-position-20261019/execution-v2/independent-final-readonly.json)。最后一帧更新主动撤下，因此比 Draw 多一次更新是预期行为。
+原始数据：[执行报告](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/report.json)、[每次回调记录](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/events.jsonl)、[离线汇总](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/analysis.json)、[独立退出核对](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/independent-final-readonly.json)。最后一帧更新主动撤下，因此比 Draw 多一次更新是预期行为。
 
 ### 16.4 录像结论及尚未证明的部分
 
-完整录像：`C:\Users\Ext1nguisher\Videos\2026-10-19 17-33-08.mp4`，1920×1080、60 fps、73.8 秒，SHA-256 `d012bbd3b9fa5ade48dbfe599b326b09eecda4903220635aa2c086bb4a9b23b0`。保存了原视频 29–54 秒的 [25 秒复看片段](../../output/hook-position-20261019/execution-v2/position-hook-review.mp4)、[全程选帧](../../output/hook-position-20261019/execution-v2/video-contact-sheet.jpg) 和 [46.8–47.9 秒的树影每 100 毫秒选帧](../../output/hook-position-20261019/execution-v2/tree-shadow-100ms-sequence.jpg)。录像时间与 QPC 没有共同的帧编号标记，视频运动起止只能近似对应。
+完整录像：`C:\Users\Ext1nguisher\Videos\2026-10-19 17-33-08.mp4`，1920×1080、60 fps、73.8 秒，SHA-256 `d012bbd3b9fa5ade48dbfe599b326b09eecda4903220635aa2c086bb4a9b23b0`。保存了原视频 29–54 秒的 [25 秒复看片段](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/position-hook-review.mp4)、[全程选帧](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/video-contact-sheet.jpg) 和 [46.8–47.9 秒的树影每 100 毫秒选帧](../../output/archive/2026-10-27/research/hook-position-20261019/execution-v2/tree-shadow-100ms-sequence.jpg)。录像时间与 QPC 没有共同的帧编号标记，视频运动起止只能近似对应。
 
 在这些选帧中没有看到先前那种明显的大范围阴影切换，树影细边缘仍有变化。尚未对全部视频帧做地形配准或分离阴影纹素量化、视差、压缩差异，因此**不能宣称零闪烁或彻底修复阴影**。
 
@@ -777,7 +777,7 @@ world_coverage = stored_step * shadow_resolution
 
 旧 UI 项目自动备份为 `output/project-history/20261019T110029933650Z.json`。当前 `output/project.json` 留下三机位、8 秒、平滑曲线/弧长分配/缓入缓出设置。
 
-共完成 7 次实际执行，原始记录均在 `output/playback-runs/`，汇总见 [UI 位置轨迹验证](../../output/ui-position-hook-verification.json)：
+共完成 7 次实际执行，原始记录均在 `output/playback-runs/`，汇总见 [UI 位置轨迹验证](../../output/archive/2026-10-27/verification/ui-position-hook-verification.json)：
 
 | 内容 | 结果 |
 |---|---|
@@ -793,7 +793,7 @@ world_coverage = stored_step * shadow_resolution
 
 第一次尝试中途停止时，操作到达已完成的 8 秒轨迹之后；这轮只计作重复正放成功。因此另用 30 秒轨迹完成实际中止验证。
 
-当前游戏留在原 B 的位置，回放仍暂停，无位置 Hook 继续运行。页面服务为 `http://127.0.0.1:56591/`；[最终界面截图](../../output/ui-position-hook.png)。独立拍摄时钟运行已验证；重开回放后的路径复现、随战斗播放同步、FOV/朝向动态轨迹仍是后续工作。
+当前游戏留在原 B 的位置，回放仍暂停，无位置 Hook 继续运行。页面服务为 `http://127.0.0.1:56591/`；[最终界面截图](../../output/archive/2026-10-27/research/ui-position-hook.png)。独立拍摄时钟运行已验证；重开回放后的路径复现、随战斗播放同步、FOV/朝向动态轨迹仍是后续工作。
 
 ## 18. 2026-10-19：0.3.0 朝向/FOV 接入，实机验收暂停
 
@@ -801,7 +801,7 @@ world_coverage = stored_step * shadow_resolution
 
 ### 实际进行的一轮试验与修正
 
-- 新试验前将原项目和当时暂停机位归档至 `output/camera-channels-030/baseline.json`；暂停时间为 23.61650562286377 秒，位置 `[-166.09970092773438,-112.08600616455078,33.7623291015625]`，水平 FOV 43.07400917771313°。
+- 新试验前将原项目和当时暂停机位归档至 `output/archive/2026-10-27/research/camera-channels-030/baseline.json`；暂停时间为 23.61650562286377 秒，位置 `[-166.09970092773438,-112.08600616455078,33.7623291015625]`，水平 FOV 43.07400917771313°。
 - `output/playback-runs/20261019T115532060273Z` 使用首版 0.3 DLL，hash `a09106fb811da33f20c8934ed5441c2ff15982af150a7f20d13c6ac23e9dfdcf`，只改变朝向，运行 0.0340528 秒、提交三次后触发 error 12。该轮是失败诊断，不是成功的转向验收。原入口已恢复，active=0、detach_mask=3。
 - 日志最后一个 Update 样本的 `Camera+50` 为 `[0.2260313481,-0.9377391934,-0.2637330294]`，而视图前向为 `[0.2260859460,-0.9377288818,-0.2637225091]`；随后只读稳定快照的缓存更新到 `[0.2260865569,-0.9377287626,-0.2637225091]`。本地反汇编表明 SetDirection 写 `+44` 并置 dirty，Refresh 构造视图时不会同步写 `+50`。首版误将缓存后续正常刷新当成外部干预。
 - 修正版改用视图的负第三列核对实际方向，保留原 `2e-5` 方向分量误差阈值；没有放宽阈值、写矩阵或改动阴影数据。事件方向字段也改为视图方向。模拟对象改为复现延迟缓存，并检查缓存滞后可通过、真实视图变化仍被拒绝。

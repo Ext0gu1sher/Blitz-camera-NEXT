@@ -3,6 +3,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from html import escape
 import json
 import math
 import os
@@ -14,9 +15,10 @@ import webbrowser
 from uuid import uuid4
 
 from .profile import CameraError, SessionChanged
-from .project import atomic_json, controls, edit_project, read_project, samples, validate_project, recycle_project
+from .project import atomic_json, controls, edit_project, read_project, write_project, convert_project, PROJECT_EXTENSIONS, MAX_PROJECT_FILE_BYTES, samples, validate_project, recycle_project
 from .reader import CameraSession
-from .playback import PositionPlayback
+from .game_backend import GameBackend, PositionPlayback
+from .deployment import Deployment
 from . import __version__
 from .terrain import TerrainStore
 from .channels import track_controls
@@ -24,9 +26,11 @@ from .pose import angles_from_quaternion
 from .replay_timeline import file_timeline, session_timeline, playback_window, replay_matches, replay_digest
 from . import replay_launcher
 from .paths import OUTPUT
+from .device_store import shared_profile_root
 from .replay_preview import ReplayPreview
 from .editor_state import read_editor_state, write_editor_state, editor_state_path, validate_editor_state
 from .settings import read_settings, save_settings, directory_path
+from .diagnostics import record_event
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = Path(__file__).resolve().parent / "web"
@@ -90,11 +94,11 @@ def project_list_item(path, last_opened=None, *, discovered=False):
         stat = p.stat()
         item['size_bytes'] = stat.st_size
         item['modified_at'] = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
-        if stat.st_size > 2*1024*1024:
+        if stat.st_size > MAX_PROJECT_FILE_BYTES:
             return None if discovered else item
         # Discovery only includes real, openable projects, not settings, editor
         # snapshots or unrelated JSON. Merely listing never records an open.
-        data = read_project(p).to_dict() if discovered else json.loads(p.read_text(encoding='utf-8-sig'))
+        data = read_project(p).to_dict()
         item['shooting_mode'] = data.get('shooting_mode') or 'replay'
         tracks = data.get('camera_tracks')
         item['keyframes'] = len({k['time_sec'] for rows in tracks.values() for k in rows} if tracks
@@ -124,7 +128,7 @@ def recent_listing():
     except OSError:
         candidates = []  # A disconnected/unavailable folder must not hide Recents.
     for path in candidates:
-        if path.suffix.lower() != '.json':
+        if path.suffix.lower() not in PROJECT_EXTENSIONS:
             continue
         try:
             identity = project_path_key(path)
@@ -137,6 +141,28 @@ def recent_listing():
         except (OSError, ValueError):
             continue
     return out
+
+
+def open_project_folder(path, *, native=False):
+    if not isinstance(native, bool):
+        raise ValueError('打开文件夹方式无效。')
+    if not isinstance(path, str) or not path.strip() or '\0' in path:
+        raise ValueError('项目文件路径无效。')
+    target = Path(path).resolve()
+    if target.suffix.lower() not in PROJECT_EXTENSIONS or not any(
+            project_path_key(item['path']) == project_path_key(target) for item in recent_listing()):
+        raise ValueError('该项目已不在项目列表，请刷新列表。')
+    # A missing project can still reveal its original folder. Only launch a
+    # directory, never the project file or a command assembled from its name.
+    folder = target.parent
+    if not folder.is_dir():
+        raise ValueError('项目所在文件夹不存在或暂时无法访问。')
+    if not native:
+        try:
+            os.startfile(str(folder), 'explore')
+        except OSError as exc:
+            raise ValueError('无法打开项目所在文件夹：' + str(exc)) from exc
+    return {'ok': True, 'directory': str(folder)}
 
 
 def startup_project():
@@ -156,13 +182,17 @@ class Workstation:
         self.replay_process = None
         self.connection = {"state": "disconnected", "message": "离线模式 · 可编辑与预演。连接只读取当前暂停的回放。"}
         self.generation = 0
+        self.connect_worker = None
         self.project_revision = 0
         self.editor_state = read_editor_state(OUTPUT, self.project_path) if self.project_path else None
         self.terrain = TerrainStore()
         self.replay_preview = ReplayPreview()
         self.selected_time = self.project.start_time if self.project else 0
         self.desktop_process = None
-        self.playback = PositionPlayback(OUTPUT/'playback-runs')
+        self.desktop_project_request = None
+        self.deployment = Deployment(OUTPUT, profile_root=shared_profile_root())
+        self.backend = GameBackend(self.deployment)
+        self.playback = PositionPlayback(OUTPUT/'playback-runs', self.backend)
         if self.project_path and self.project_path.exists():
             record_recent(self.project_path)
         self.poller = threading.Thread(target=self._poll, daemon=True); self.poller.start()
@@ -171,6 +201,7 @@ class Workstation:
         with self.lock:
             return deepcopy({"connection": self.connection, "sample": self.sample,
                              "replay_info": self.replay_info,
+                             "desktop_project_request": self.desktop_project_request,
                              "replay_launch": self.replay_launch,
                              "keyframe_guard": self.keyframe_guard(),
                              "replay_keyframe_start_seconds": read_settings(OUTPUT)['replay_keyframe_start_seconds'],
@@ -180,28 +211,53 @@ class Workstation:
                              "camera_track_controls": track_controls(self.project) if self.project else {},
                              "project_path": str(self.project_path) if self.project_path else None, "project_name": self.project_path.stem if self.project_path else None,
                              "playback": self.playback.state(),
-                             "version": __version__, "project_revision": self.project_revision,
+                             "version": __version__, "edition": 'pro' if self.deployment.enabled else 'next',
+                             "project_revision": self.project_revision,
                              "ui": {"selected_time": self.selected_time},
                              "editor_state": self.editor_state,
-                             "capabilities": {"read_capture": True, "offline_preview": True,
-                                              "game_write": True, "game_restore": False,
-                                              "position_playback": True, "orientation_playback": True,
-                                              "replay_speed": True, "linked_playback": True, "fov_playback": True, "fixed_orientation_fov": False}})
+                             "capabilities": {"read_capture": self.deployment.enabled, "offline_preview": True,
+                                              "game_write": self.deployment.enabled, "game_restore": False,
+                                              **{name: self.deployment.enabled for name in ('position_playback', 'orientation_playback', 'replay_speed', 'linked_playback', 'fov_playback')},
+                                              "fixed_orientation_fov": False}})
+
+    def record_diagnostic(self, event, error=None, **details):
+        with self.lock:
+            project=self.project
+            context={'connection':deepcopy(self.connection), 'replay_launch':deepcopy(self.replay_launch),
+                     'replay_info':deepcopy(self.replay_info), 'game_replay':deepcopy((self.sample or {}).get('replay')),
+                     'project_revision':self.project_revision, 'project_path':str(self.project_path) if self.project_path else None,
+                     'project_timing':{'shooting_mode':project.shooting_mode,
+                                       'replay_timeline':deepcopy(project.replay_timeline),
+                                       'replay_speed':deepcopy(project.replay_speed)} if project else None,
+                     **details}
+            record_event(OUTPUT,event,error=error,context=context)
 
     def connect(self):
         with self.lock:
+            self.backend.require()
             self.require_project()
             if self.replay_launch['state'] in ('choosing', 'launching'):
                 raise CameraError('请先完成回放文件选择与启动。')
             if self.connection["state"] == "connecting":
                 return
+            # Deployed adapters may finish an in-flight memory scan only when
+            # connect() returns. Invalidation must not allow overlapping scans.
+            if self.connect_worker and self.connect_worker.is_alive():
+                raise CameraError('上一轮连接检查仍在结束，请稍后再连接。')
             self.disconnect(); self.generation += 1; generation = self.generation
             self.connection = {"state": "connecting", "message": "核验客户端构建与回放相机引用…"}
         def worker():
             session = None
             source_error = None
+            stage='connect'
+            started=time.monotonic()
             try:
-                session = CameraSession.connect(); sample = session.capture()
+                session = self.backend.connect()
+                with self.lock:
+                    if generation != self.generation:
+                        session.close(); return
+                stage='capture'
+                sample = session.capture()
                 try: replay_info = session_timeline(session)
                 except Exception as exc:
                     replay_info = None; source_error = str(exc)
@@ -211,6 +267,7 @@ class Workstation:
                 with self.lock:
                     if generation == self.generation:
                         self.connection = {"state": "error", "message": str(exc)}
+                        self.record_diagnostic('connection.failed',exc,stage=stage,elapsed_seconds=time.monotonic()-started)
                 return
             with self.lock:
                 if generation != self.generation:
@@ -246,6 +303,7 @@ class Workstation:
                             session.close()
                             self.session, self.sample = None, None
                             self.connection = {'state':'error', 'message':launch['message']}
+                            self.record_diagnostic('connection.failed',exc,stage='verify_replay_source',elapsed_seconds=time.monotonic()-started)
                             return
                 elif replay_info is None:
                     source_warning = '当前回放文件暂未识别；请等待回放加载稳定后重新连接。'
@@ -261,7 +319,12 @@ class Workstation:
                 if source_warning:
                     self.connection.update(source_warning=source_warning, source_error=source_error)
                     self.connection['message'] += '；' + source_warning
-        threading.Thread(target=worker, daemon=True).start()
+                self.record_diagnostic('connection.ready',elapsed_seconds=time.monotonic()-started)
+        with self.lock:
+            if generation != self.generation:
+                return
+            self.connect_worker = threading.Thread(target=worker, daemon=True)
+            self.connect_worker.start()
 
     def open_project_replay(self):
         with self.lock:
@@ -450,7 +513,7 @@ class Workstation:
                     and (project.shooting_mode == 'camera_only' or track_controls(project) != track_controls(self.project))):
                 project.replay_timeline.pop('starter_keyframes_pending', None)
             self._remember_replay_identity(project)
-            atomic_json(self.project_path, project.to_dict())
+            write_project(self.project_path, project)
             self.project = project
             self.project_revision += 1
             if not any(k.time_sec == self.selected_time for k in project.keyframes):
@@ -520,13 +583,27 @@ class Workstation:
                 pass  # Legacy projects may need the user to select a local copy.
 
     def _switch_to(self, path, project, *, remember=True):
-        self.project_path = Path(path).resolve()
+        target=Path(path).resolve()
+        previous_path=self.project_path
+        if target!=self.project_path:
+            # A connection begun for A must not finish by binding project B.
+            self.generation+=1
+            if self.connection['state']=='connecting':
+                self.connection={'state':'disconnected','message':'项目已切换，请重新连接当前回放。'}
+            # Completed Open requests belong to the previous project. Keep an
+            # actual read session, but never compare B with A's old file choice.
+            # Pending file dialogs retain their existing project-change guard.
+            if self.replay_launch['state'] not in ('choosing','launching'):
+                self.replay_launch={'state':'idle','verified':False,'message':'项目已切换；连接时核对游戏当前回放。'}
+        self.project_path = target
         self.project = project
         self.project_revision += 1
         self.selected_time = project.start_time
         self.editor_state = read_editor_state(OUTPUT, self.project_path) if remember else None
         if remember:
             record_recent(self.project_path)
+        if previous_path!=self.project_path:
+            self.record_diagnostic('project.switched',previous_project=str(previous_path) if previous_path else None)
 
     def save_editor_state(self, path, value, draft=None, expected_revision=None):
         with self.lock:
@@ -567,7 +644,7 @@ class Workstation:
             raise ValueError('项目名称无效。')
         directory = Path(read_settings(OUTPUT)['project_directory'])
         directory.mkdir(parents=True, exist_ok=True)
-        path = (directory/(safe+'.json')).resolve()
+        path = (directory/(safe+'.bcnproj')).resolve()
         if path.parent != directory.resolve() or path.exists():
             raise ValueError('同名项目已存在，请换一个名称。')
         data = read_project(ROOT/"examples/eight-second.json").to_dict()
@@ -578,7 +655,7 @@ class Workstation:
         with self.lock:
             if self.playback.state()['active']:
                 raise CameraError('运镜期间请先停止，再切换项目。')
-            atomic_json(path, project.to_dict())
+            write_project(path, project, overwrite=False)
             self._switch_to(path, project)
         return str(path)
 
@@ -593,17 +670,17 @@ class Workstation:
             if self.replay_launch['state'] in ('choosing', 'launching'):
                 raise CameraError('请先完成回放选择与启动，再删除项目。')
             known = any(Path(item['path']).resolve() == target for item in recent_listing())
-            if not known or target.suffix.lower() != '.json' or not target.is_file():
+            if not known or target.suffix.lower() not in PROJECT_EXTENSIONS or not target.is_file():
                 raise ValueError('该项目已不在项目列表或文件不存在，请刷新列表。')
             current = target == self.project_path
             if current:
                 # Prepare an unsaved workspace before touching the current file.
                 # It stays out of Recents until the user actually saves an edit.
                 directory = Path(read_settings(OUTPUT)['project_directory'])
-                blank_path = directory/'未命名.json'
+                blank_path = directory/'未命名.bcnproj'
                 index = 2
                 while blank_path.exists() or blank_path == target:
-                    blank_path = directory/f'未命名 {index}.json'
+                    blank_path = directory/f'未命名 {index}.bcnproj'
                     index += 1
                 data = read_project(ROOT/'examples/eight-second.json').to_dict()
                 data['shooting_mode'] = 'replay'
@@ -621,13 +698,14 @@ class Workstation:
 
     def save_project_as(self, path):
         path = Path(path).resolve()
-        if path.suffix.lower() != '.json':
-            path = path.with_suffix('.json')
+        if path.suffix.lower() not in PROJECT_EXTENSIONS:
+            path = path.with_suffix('.bcnproj')
         with self.lock:
             if self.playback.state()['active']:
                 raise CameraError('运镜期间请先停止，再保存项目。')
             self._remember_replay_identity(self.project)
-            atomic_json(path, self.project.to_dict())
+            self.require_project()
+            write_project(path, self.project)
             if self.editor_state is not None:
                 write_editor_state(OUTPUT, path, self.editor_state)
             self._switch_to(path, self.project)
@@ -862,6 +940,8 @@ def make_handler(workstation):
                 self._send(200, workstation.state()); return
             if path == '/api/settings':
                 self._send(200, read_settings(OUTPUT)); return
+            if path == '/api/deployment':
+                self._send(200, workstation.deployment.status()); return
             if path == "/api/export":
                 self._send(200, workstation.state()["project"], download=True); return
             if path == "/api/projects/recent":
@@ -903,6 +983,7 @@ def make_handler(workstation):
                       "/number-field.js": ("number-field.js", "text/javascript; charset=utf-8"),
                       "/number-field.css": ("number-field.css", "text/css; charset=utf-8"),
                       "/preview-guides.js": ("preview-guides.js", "text/javascript; charset=utf-8"),
+                      "/preview-resources.js": ("preview-resources.js", "text/javascript; charset=utf-8"),
                       "/overlay": ("overlay.html", "text/html; charset=utf-8"),
                       "/overlay.js": ("overlay.js", "text/javascript; charset=utf-8"),
                       "/overlay.css": ("overlay.css", "text/css; charset=utf-8"),
@@ -924,6 +1005,8 @@ def make_handler(workstation):
                       "/replay-open.css": ("replay-open.css", "text/css; charset=utf-8"),
                       "/terrain-preview.js": ("terrain-preview.js", "text/javascript; charset=utf-8"),
                       "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                      "/deployment.js": ("deployment.js", "text/javascript; charset=utf-8"),
+                      "/deployment.css": ("deployment.css", "text/css; charset=utf-8"),
                       "/controls.js": ("controls.js", "text/javascript; charset=utf-8"),
                       "/control-settings.js": ("control-settings.js", "text/javascript; charset=utf-8"),
                       "/control-schema.json": ("control-schema.json", "application/json; charset=utf-8"),
@@ -931,7 +1014,19 @@ def make_handler(workstation):
                       "/style.css": ("style.css", "text/css; charset=utf-8")}
             if path in assets:
                 name, content_type = assets[path]
-                self._send(200, (WEB/name).read_bytes(), content_type); return
+                content = (WEB/name).read_bytes()
+                if name == 'index.html':
+                    startup = workstation.deployment.startup_state()
+                    sound = read_settings(OUTPUT)['startup_sound']
+                    page = content.decode('utf-8')
+                    page = page.replace('{{APP_VERSION}}', escape(__version__))
+                    page = page.replace('data-edition="next"', f'data-edition="{startup["edition"]}"')
+                    page = page.replace('data-pro-intro=""', f'data-pro-intro="{startup["intro_token"]}"')
+                    page = page.replace('data-startup-sound="true"', f'data-startup-sound="{str(sound).lower()}"')
+                    if startup['edition'] == 'pro':
+                        page = page.replace('Blitz Camera NEXT', 'Blitz Camera Pro')
+                    content = page.encode('utf-8')
+                self._send(200, content, content_type); return
             self._send(404, {"error": "页面不存在。"})
 
         def do_POST(self):
@@ -947,13 +1042,42 @@ def make_handler(workstation):
                 if not isinstance(data, dict):
                     raise ValueError("请求需为对象。")
                 path = urlsplit(self.path).path
-                if workstation.project is None and path not in {
+                if workstation.project is None and not path.startswith('/api/deployment/') and path not in {
                     '/api/settings', '/api/settings/directory', '/api/projects/new', '/api/projects/open',
-                    '/api/projects/forget', '/api/projects/delete', '/api/desktop/open', '/api/desktop/workbench',
+                    '/api/projects/convert', '/api/desktop/project', '/api/desktop/project/ack',
+                    '/api/projects/forget', '/api/projects/delete', '/api/projects/open_folder', '/api/desktop/open', '/api/desktop/workbench',
                     '/api/disconnect', '/api/playback/stop',
+                    '/api/replay/select', '/api/replay/timeline',
                 }:
                     workstation.require_project()
-                if path == "/api/connect": workstation.connect()
+                if path in {'/api/connect', '/api/capture', '/api/capture/hotkey', '/api/playback/start',
+                            '/api/playback/pause', '/api/replay/open', '/api/replay/open_project', '/api/desktop/open'}:
+                    workstation.backend.require()
+                if path == '/api/deployment/startup-seen':
+                    acknowledged = workstation.deployment.acknowledge_startup(data.get('token'))
+                    self._send(200, {'ok': acknowledged}); return
+                elif path == '/api/deployment/export':
+                    from .file_dialogs import show_dialog
+                    selected = show_dialog(title='导出配置', save=True, default_ext='bcconfig',
+                                           default_name='BlitzCamera.bcconfig', filters=(('配置文件', '*.bcconfig'),))
+                    result = {'cancelled': True} if selected is None else workstation.deployment.export_config(selected)
+                    self._send(200, result); return
+                elif path == '/api/deployment/select':
+                    from .file_dialogs import show_dialog
+                    selected = show_dialog(title='选择升级包', filters=(('升级包', '*.bcupdate'),))
+                    result = {'cancelled': True} if selected is None else workstation.deployment.inspect(selected)
+                    self._send(200, result); return
+                elif path == '/api/deployment/install':
+                    with workstation.lock:
+                        if workstation.session or workstation.connection['state'] == 'connecting' or workstation.playback.state()['active']:
+                            raise CameraError('请先停止游戏操作并断开连接，再部署升级包。')
+                        pids = [int(os.environ['BLITZCAM_LAUNCHER_PID'])] if os.environ.get('BLITZCAM_LAUNCHER_PID') else []
+                        if workstation.desktop_process is not None and workstation.desktop_process.poll() is None:
+                            pids.append(workstation.desktop_process.pid)
+                        result = workstation.deployment.install(data.get('token'), pids=pids,
+                                                                backend_loaded=workstation.backend.loaded, restart_pro=True)
+                    self._send(200, result); return
+                elif path == "/api/connect": workstation.connect()
                 elif path == '/api/settings':
                     with workstation.lock:
                         settings=save_settings(OUTPUT,data)
@@ -999,9 +1123,18 @@ def make_handler(workstation):
                     from .desktop import open_overlay
                     with workstation.lock:
                         workstation.desktop_process = open_overlay(f'http://127.0.0.1:{self.server.server_address[1]}/', workstation.desktop_process)
-                elif path == "/api/desktop/workbench":
+                elif path == '/api/desktop/project/ack':
+                    with workstation.lock:
+                        if workstation.desktop_project_request and workstation.desktop_project_request['id'] == data.get('id'):
+                            workstation.desktop_project_request = None
+                    self._send(200, {'ok': True}); return
+                elif path in ('/api/desktop/workbench', '/api/desktop/project'):
                     from .desktop import open_overlay
                     with workstation.lock:
+                        if path == '/api/desktop/project':
+                            selected = Path(data['path']).resolve(strict=True)
+                            read_project(selected)
+                            workstation.desktop_project_request = {'id': str(uuid4()), 'path': str(selected)}
                         workstation.desktop_process = open_overlay(f'http://127.0.0.1:{self.server.server_address[1]}/', workstation.desktop_process, view='workbench')
                 elif path == "/api/playback/start": workstation.play(data.get('reverse',False),data.get('orientation_enabled',True),data.get('fov_enabled',True),data.get('speed_only',False),data.get('seconds',8),data.get('expected_revision'),data.get('mode','auto'))
                 elif path == "/api/project/retime": workstation.retime(data['seconds'],data.get('expected_revision'))
@@ -1015,6 +1148,32 @@ def make_handler(workstation):
                             self._send(200, {'cancelled': True}); return
                     workstation.open_project(selected)
                     self._send(200, {'ok': True, 'path': str(workstation.project_path)}); return
+                elif path == '/api/projects/convert':
+                    extension = data.get('format')
+                    if extension not in PROJECT_EXTENSIONS:
+                        raise ValueError('请选择 .bcnproj 或 .json 目标格式。')
+                    source = data.get('source')
+                    if source is None:
+                        source = replay_launcher.choose_project(Path(read_settings(OUTPUT)['project_directory']),
+                                                                extension='.json' if extension == '.bcnproj' else '.bcnproj')
+                    if source is None:
+                        self._send(200, {'cancelled': True}); return
+                    source = Path(source).resolve()
+                    read_project(source)
+                    target = data.get('destination')
+                    if target is None:
+                        target = replay_launcher.save_project(source.stem, source.parent, extension=extension)
+                    if target is None:
+                        self._send(200, {'cancelled': True}); return
+                    target = Path(target).with_suffix(extension)
+                    converted = convert_project(source, target)
+                    previous_view = read_editor_state(OUTPUT, source)
+                    if previous_view is not None:
+                        try:
+                            write_editor_state(OUTPUT, target, previous_view)
+                        except OSError:
+                            pass  # The project was converted; optional local view state is independent.
+                    self._send(200, {'ok': True, 'path': converted}); return
                 elif path == "/api/projects/new":
                     self._send(200, {'ok': True, 'path': workstation.new_project_file(data.get('name'))}); return
                 elif path == "/api/projects/save_as":
@@ -1024,6 +1183,8 @@ def make_handler(workstation):
                     self._send(200, {'ok': True, 'path': workstation.save_project_as(selected)}); return
                 elif path == "/api/projects/forget":
                     forget_recent(data.get('path'))
+                elif path == "/api/projects/open_folder":
+                    self._send(200, open_project_folder(data.get('path'), native=data.get('native', False))); return
                 elif path == "/api/projects/delete":
                     self._send(200, workstation.delete_project(data.get('path'), data.get('expected_revision'))); return
                 elif path == "/api/project": workstation.set_project(validate_project(data["project"]), data.get("expected_revision"))
@@ -1068,6 +1229,9 @@ def make_handler(workstation):
                     self._send(404, {"error": "操作不存在。"}); return
                 self._send(200, {"ok": True})
             except (ValueError, KeyError, TypeError, CameraError, OSError) as exc:
+                failed_path=urlsplit(self.path).path
+                if failed_path in {'/api/connect','/api/playback/start','/api/replay/open','/api/replay/open_project'}:
+                    workstation.record_diagnostic('request.failed',exc,path=failed_path)
                 self._send(400, {"error": str(exc)})
 
     return Handler

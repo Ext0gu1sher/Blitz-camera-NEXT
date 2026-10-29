@@ -24,19 +24,19 @@ def verify_launch_source(process_info, launch, replay_info, source_error=None):
 
     The camera reader has already required one supported replay process. This
     checks its executable and observed file against the explicit Open request.
-    Runtime observations refer to the active player; legacy arguments do not
-    detect subsequent replay switches inside that process.
+    Runtime observations refer to the active player. The launch request alone
+    is never evidence of the file actually being played.
     """
     if Path(process_info.path).resolve() != Path(launch['executable']).resolve():
         raise CameraError('当前游戏的安装位置与本次启动的客户端不一致。')
-    if not replay_info:
+    if not replay_info or replay_info.get('verification') != 'runtime_replay':
         detail = f'：{source_error}' if source_error else '，请重新连接'
         raise ReplaySourceUnavailable('无法读取游戏当前的回放文件' + detail.rstrip('。') + '。')
     if not replay_matches(launch['info'], replay_info):
         raise CameraError('游戏当前的回放与本次选择不一致。')
     return {'launch_pid':launch.get('pid'), 'connected_pid':process_info.pid,
             'process_handoff':process_info.pid != launch.get('pid'),
-            'verification':'runtime_replay' if replay_info.get('verification') == 'runtime_replay' else 'launch_arguments'}
+            'verification':'runtime_replay'}
 
 
 def _vdf_string(text, key):
@@ -108,20 +108,22 @@ def choose_replay():
                        initial=initial, remember_location=True)
 
 
-def choose_project(directory=None):
+def choose_project(directory=None, extension=None):
     from .paths import OUTPUT
     return show_dialog(title='打开项目 · Blitz Camera',
-                       filters=[('Blitz Camera 项目 (*.json)', '*.json')],
+                       filters=[('Blitz Camera 项目', '*'+extension)] if extension else
+                               [('Blitz Camera 项目 (*.bcnproj; *.json)', '*.bcnproj;*.json'),
+                                ('BCN 项目 (*.bcnproj)', '*.bcnproj'), ('旧版 JSON 项目 (*.json)', '*.json')],
                        initial=directory or OUTPUT/'projects')
 
 
-def save_project(default_name='', directory=None):
+def save_project(default_name='', directory=None, extension='.bcnproj'):
     from .paths import OUTPUT
     directory = Path(directory or OUTPUT/'projects')
     directory.mkdir(parents=True, exist_ok=True)
     return show_dialog(title='另存为 · Blitz Camera', save=True,
-                       filters=[('Blitz Camera 项目 (*.json)', '*.json')],
-                       initial=directory, default_ext='json', default_name=default_name)
+                       filters=[('BCN 项目 (*.bcnproj)' if extension == '.bcnproj' else '旧版 JSON 项目 (*.json)', '*'+extension)],
+                       initial=directory, default_ext=extension.lstrip('.'), default_name=default_name)
 
 
 def choose_directory(initial=None):

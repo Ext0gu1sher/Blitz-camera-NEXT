@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'"><title>Blitz Camera Pro Studio</title><link rel="stylesheet" href="studio.css"><script src="studio.js" defer></script></head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">P</span><div>Blitz Camera<strong>Pro Studio</strong></div></div>
+    <div class="internal">内部制作与发包工具</div>
+    <nav aria-label="工具页面"><button data-tab="issue" class="active">批量发包<span>01</span></button><button data-tab="make">制作母包<span>02</span></button><button data-tab="history">发布记录<span>03</span></button><button data-tab="settings">发布设置<span>04</span></button></nav>
+    <div class="sidebar-foot"><i></i>完全离线<span>母包 v1 · 接口 v1</span></div>
+  </aside>
+  <main>
+    <header><div><p class="eyebrow">BLITZ CAMERA / PUBLISHER</p><h1 id="pageTitle">批量发包</h1></div><span class="version">STUDIO 1.0</span></header>
+    <section id="issuePage" class="page">
+      <p class="intro">选择已完成适配的母包，勾选用户配置，为每台设备生成独立的升级包。</p>
+      <div class="two-columns">
+        <section class="card master-card"><div class="card-heading"><h2><span class="step">1</span>适配母包</h2><button id="importMaster" class="secondary">导入母包</button></div>
+          <label class="field-label" for="masterSelect">已保存的版本</label><select id="masterSelect"><option value="">请导入 .bcpro 母包</option></select>
+          <div id="masterEmpty" class="empty">每次解析新版本后，先制作一个母包。<br>同一个母包可以多次、多人发放。</div>
+          <div id="masterDetails" hidden>
+            <div class="release-line"><strong id="masterVersion"></strong><span class="pill" id="validationLevel"></span></div>
+            <dl><dt>客户端</dt><dd id="clientVersion"></dd><dt>渠道</dt><dd id="clientChannel"></dd><dt>最低主程序</dt><dd id="hostVersion"></dd><dt>组成</dt><dd id="masterComposition"></dd><dt>母包标识</dt><dd id="masterIdentity" class="mono"></dd></dl>
+            <p id="masterNotes" class="notes"></p><p id="validationSummary" class="small"></p>
+            <button id="inspectMaster" class="text-button">重新校验母包</button>
+          </div>
+          <div class="notice">母包含未加密的适配实现，仅供内部保存。发给用户的是生成后的 .bcupdate 文件。</div>
+        </section>
+        <section class="card recipients-card"><div class="card-heading"><h2><span class="step">2</span>用户配置</h2><button id="importConfigs" class="secondary">导入配置</button></div>
+          <div class="selection-line"><label><input id="selectAll" type="checkbox"> 全选</label><span id="selectionCount">未选择设备</span></div>
+          <div id="deviceList" class="device-list"></div><div id="deviceEmpty" class="empty">导入用户从客户端导出的 .bcconfig。<br>配置会保存在这里，下一次更新可直接复用。</div>
+          <p class="small">同一设备自动去重；换电脑或重装系统后，请使用用户重新导出的配置。</p>
+        </section>
+      </div>
+      <section class="issue-bar"><div><span class="field-label">输出文件夹</span><div id="issueOutput" class="output-path">请在发布设置中选择</div></div><button id="chooseOutput" class="secondary">更改</button><button id="checkBatch" class="secondary">检查发包条件</button><button id="issueBatch" class="primary">生成加密升级包</button></section>
+      <section id="batchResult" class="card result-card" hidden><div class="card-heading"><h2>升级包已生成</h2><button id="openBatch" class="secondary">打开输出文件夹</button></div><p id="batchSummary"></p><div id="batchFiles" class="batch-files"></div><p class="small">每个文件对应一台设备；分发清单与版本记录已一同保存。</p></section>
+    </section>
+    <section id="makePage" class="page" hidden>
+      <p class="intro">新版本解析完成后，用规范的源码清单生成可重复发放的母包。制作过程无需用户配置或发布私钥。</p>
+      <section class="card wide-card"><h2>从适配源码制作</h2><p class="small">源码清单记录客户端精确哈希、发布版本、原生组件与验证证据。工具只做静态检查，不运行适配代码。</p>
+        <label class="field-label" for="recipePath">适配源码清单 · adapter.json</label><div class="path-row"><input id="recipePath" spellcheck="false" placeholder="选择 adapter.json"><button id="chooseRecipe" class="secondary">选择清单</button></div>
+        <label class="field-label" for="masterOutput">保存母包</label><div class="path-row"><input id="masterOutput" spellcheck="false" placeholder="选择新的 .bcpro 文件"><button id="chooseMasterOutput" class="secondary">选择位置</button></div>
+        <div class="make-contract"><div><strong>版本固定</strong><span>每次内容变化使用新的修订号</span></div><div><strong>组成完整</strong><span>模块、原生 DLL 和验证记录一起封装</span></div><div><strong>可重复发放</strong><span>制作完成后独立于源码目录</span></div></div>
+        <div class="actions"><button id="makeMaster" class="primary">检查并制作母包</button></div>
+      </section>
+      <section class="card wide-card workflow"><h2>每次适配的固定交付</h2><ol><li>分析新客户端，更新布局与 Hook，记录精确构建哈希。</li><li>补齐适配源码清单和验证记录，明确是否做过游戏内实测。</li><li>生成 .bcpro 母包并交付给你，保留旧版本。</li><li>在“批量发包”中选择母包，勾选用户，生成独立加密包。</li></ol></section>
+    </section>
+    <section id="historyPage" class="page" hidden><p class="intro">按母包版本追溯每次发放。输出文件夹内保留包文件、SHA-256 和设备对应清单。</p><div id="historyList"></div><div id="historyEmpty" class="card empty">还没有发布记录。</div></section>
+    <section id="settingsPage" class="page" hidden><p class="intro">沿用客户端已信任的发布身份。制作工具和发布私钥都保留在你这里。</p>
+      <section class="card wide-card"><h2>发布文件</h2>
+        <label class="field-label" for="keyPath">发布私钥 · 当前 Windows 用户保护</label><div class="path-row"><input id="keyPath" spellcheck="false"><button data-pick="keyPath" data-kind="key" class="secondary">选择</button></div>
+        <label class="field-label" for="trustPath">客户端公钥文件</label><div class="path-row"><input id="trustPath" spellcheck="false"><button data-pick="trustPath" data-kind="trust" class="secondary">选择</button></div>
+        <label class="field-label" for="outputDirectory">默认输出文件夹</label><div class="path-row"><input id="outputDirectory" spellcheck="false"><button data-pick="outputDirectory" data-kind="folder" class="secondary">选择</button></div>
+        <div class="actions"><button id="saveSettings" class="primary">保存设置</button><button id="verifyKey" class="secondary">验证发布身份</button></div><p id="keyResult" class="small mono"></p>
+      </section>
+      <section class="card wide-card"><h2>密钥备份与恢复</h2><p class="small">更换电脑前先做加密备份。备份口令至少 16 个字符，与备份文件分开保管。恢复不会覆盖已有私钥。</p>
+        <div class="password-row"><label class="field-label">备份口令<input id="backupPassword" type="password" autocomplete="new-password"></label><label class="field-label">重复口令<input id="backupConfirm" type="password" autocomplete="new-password"></label></div>
+        <div class="actions"><button id="backupKey" class="secondary">导出加密备份</button><button id="restoreKey" class="text-button">从备份恢复</button></div>
+      </section>
+    </section>
+    <div id="status" class="status" role="status" aria-live="polite">正在读取制作工具…</div>
+  </main>
+</body></html>

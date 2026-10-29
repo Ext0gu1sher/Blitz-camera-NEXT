@@ -95,4 +95,17 @@ test('varied curve lengths and multi-selections remain valid at drag limits',()=
   const {before}=drag(e,selected,anchor,(random()-.5)*80,(random()-.5)*2);unchanged(e,before,selected);
  }
 });
+test('camera keys, scrubbing and key navigation land exactly on varied-speed rate keys',()=>{
+ for(const axis of ['replay','shooting']){
+  const e=fixture(false,true);e.axis=axis;e.scale=40;e.fps=60;e.snap=true;e.playhead=11;e.selected=new Set();
+  e.render=()=>{};e.autoPan=()=>{};e.beatGrid=()=>null;e.beatLaneHeight=()=>0;e.free=()=>false;
+  const map=e.map(),rateKey=e.doc.speed.keyframes[2],target=map.rateTime(rateKey.progress),key=e.doc.tracks.x[0];
+  e.drag={kind:'key',x:14+e.displayTime(key.time_sec,map)*e.scale,y:52,map,before:clone(e.doc),ids:new Set([key._id]),anchor:key._id,rate:false,moved:false};
+  e.point=()=>({x:14+e.rateDisplay(rateKey.progress,map)*e.scale+3,y:52});e.move({});
+  assert.ok(Math.abs(e.doc.tracks.x[0].time_sec-target)<1e-6,`${axis} camera key ${e.doc.tracks.x[0].time_sec} != rate key ${target}`);
+  let seeked=null;e.doc=clone(e.drag.before);e.drag=null;e.adapter={seek:t=>seeked=t};
+  e.scrub(14+e.rateDisplay(rateKey.progress,map)*e.scale-3,map,{});near(seeked,target,`${axis} scrub`);
+  e.playhead=times(e)[1]+1e-3;e.action('next');near(seeked,target,`${axis} next key`);
+ }
+});
 console.log(JSON.stringify({passed:true,checks}));

@@ -162,21 +162,17 @@ def validate_new_keyframes(previous, candidate, settings, metadata=None):
 
 
 def session_timeline(session):
-    # Prefer the file actually owned by ReplayPlayer. Steam handoffs and opening
-    # a replay inside an existing client need not leave a filename in argv.
-    from .replay_map import launch_replay_path
+    # Only the file owned by the active ReplayPlayer identifies this session.
     from .replay_launcher import ReplaySourceUnavailable
-    from .replay_source import supports_runtime_source, runtime_replay_source
+    from .replay_source import runtime_replay_source
     from .profile import CameraError
     try:
-        if supports_runtime_source(session):
-            before = runtime_replay_source(session)
-            result = file_timeline(before.path)
-            if (runtime_replay_source(session) != before or
-                    result['version'] not in (before.version, before.client_version)):
-                raise ValueError('读取期间当前回放文件已变化，请重新连接。')
-            return {**result, 'source':'runtime_replay', 'verification':'runtime_replay'}
-        return {**file_timeline(launch_replay_path(session.memory)), 'source':'launch_argument'}
+        before = runtime_replay_source(session)
+        result = file_timeline(before.path)
+        if (runtime_replay_source(session) != before or
+                result['version'] not in (before.version, before.client_version)):
+            raise ValueError('读取期间当前回放文件已变化，请重新连接。')
+        return {**result, 'source':'runtime_replay', 'verification':'runtime_replay'}
     except (OSError, ValueError, CameraError) as exc:
         raise ReplaySourceUnavailable('暂时无法读取游戏当前的回放文件。请待回放加载稳定后重新连接。'
                                       f' 读取原因：{exc}') from exc

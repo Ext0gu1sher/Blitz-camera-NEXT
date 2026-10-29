@@ -1,0 +1,33 @@
+{
+  "format": "blitz-camera-pro-source-v1",
+  "release": {
+    "adapter_id": "steam-international",
+    "version": "11.21-r1",
+    "adapter_api": 1,
+    "host_min_version": "0.9.6-beta",
+    "client": {
+      "channel": "Steam 国际版",
+      "version": "11.21.0.1235",
+      "sha256": "5030ee4b9f6ec7db1c06efa2b92f9dd7243574be5d8d9578c118119318bc9608",
+      "architecture": "x86"
+    },
+    "entrypoints": {
+      "reader": "reader:CameraSession",
+      "playback": "playback:PositionPlayback"
+    },
+    "notes": "Steam 国际版 11.21.0.1235 适配。保留现有运镜、回放定位和相机控制实现。",
+    "validation": {
+      "level": "offline",
+      "summary": "沿用当前已实现的 11.21 适配代码；标准母包封装完成离线校验。本次制作未连接游戏或执行 Hook，不能据此声称完成新一轮游戏内实测。"
+    }
+  },
+  "source_root": "source",
+  "native_manifests": [
+    "position_hook_1121.json",
+    "replay_seek_phase_trial_1121.json",
+    "freecamera_switch_1121.json"
+  ],
+  "evidence": [
+    "validation.json"
+  ]
+}

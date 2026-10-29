@@ -33,6 +33,6 @@ blitzcam/replay_clock.py 按记录边界读取首个 0x11 的 clock，只读 ZIP
 - 277 项离线测试通过，包含原点读取边界、错误输入、四种原点、客户端时间到车辆原始时间的转换以及摄像机时间不变。
 - Canal 和 Plant 的浏览器完整离线场景验收通过；确认自动换算、正反向拖动一致、速度曲线联动及摄像机与后端求值一致，无游戏 API 请求。
 - 将用户当前项目只读复制到隔离服务，用水塔入点、移动中和后续两机位生成修复前后截图，已查看水塔构图及车辆到达位置；原项目文件逐字节保持一致。旧手动补偿不会重新叠加。
-- 验收结果：output/replay-preview-091-acceptance/result.json；当前项目诊断及截图：output/timing-investigation/corrected-readings.json、corrected-*.png、previous-*.png。
+- 验收结果：output/archive/2026-10-27/verification/replay-preview-091-acceptance/result.json；当前项目诊断及截图：output/archive/2026-10-27/research/timing-investigation/corrected-readings.json、corrected-*.png、previous-*.png。
 
 本轮未启动、操作或重录游戏；实机比较依据用户提供的录像及已有运镜报告。修复消除了已确认的固定时钟偏差，不宣称车辆插值、悬挂或最终渲染达到逐帧复刻。更新后需重启工作台及本地服务，重新载入预览。

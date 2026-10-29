@@ -9,6 +9,12 @@ import tempfile
 from .pose import quaternion_from_angles, angles_from_quaternion
 from .trajectory import Trajectory, Keyframe, Pose
 
+PROJECT_EXTENSIONS = ('.bcnproj', '.json')
+PROJECT_FORMAT = 'blitz-camera-project'
+PROJECT_FORMAT_VERSION = 1
+MAX_PROJECT_BYTES = 2 * 1024 * 1024
+MAX_PROJECT_FILE_BYTES = MAX_PROJECT_BYTES * 2 + 4096
+
 
 def validate_project(data):
     if not isinstance(data, dict) or not isinstance(data.get("keyframes"), list):
@@ -67,9 +73,47 @@ def controls(trajectory):
 
 def read_project(path):
     path = Path(path)
-    if path.stat().st_size > 2*1024*1024:
-        raise ValueError("项目 JSON 不能超过 2 MiB。")
-    return validate_project(json.loads(path.read_text(encoding="utf-8-sig")))
+    if path.suffix.lower() not in PROJECT_EXTENSIONS:
+        raise ValueError('请选择 .bcnproj 或旧版 .json 项目。')
+    with path.open('rb') as stream:
+        raw = stream.read(MAX_PROJECT_FILE_BYTES + 1)
+    if len(raw) > MAX_PROJECT_FILE_BYTES:
+        raise ValueError('项目数据不能超过 2 MiB。')
+    data = json.loads(raw.decode('utf-8-sig'))
+    if path.suffix.lower() == '.bcnproj':
+        if not isinstance(data, dict) or data.get('format') != PROJECT_FORMAT:
+            raise ValueError('不是有效的 BCN 项目，请使用设置中的格式转换导入旧项目。')
+        if type(data.get('format_version')) is not int or data['format_version'] != PROJECT_FORMAT_VERSION:
+            raise ValueError('不支持此 BCN 项目版本，请使用匹配或更新版本的 Blitz Camera。')
+        data = data.get('project')
+    if len((json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + '\n').encode('utf-8')) > MAX_PROJECT_BYTES:
+        raise ValueError('项目数据不能超过 2 MiB。')
+    return validate_project(data)
+
+
+def write_project(path, project, *, overwrite=True):
+    """BCN v1 is a UTF-8 envelope; legacy JSON remains readable and writable."""
+    path = Path(path)
+    if path.suffix.lower() not in PROJECT_EXTENSIONS:
+        raise ValueError('项目扩展名必须是 .bcnproj 或 .json。')
+    data = project.to_dict()
+    if len((json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + '\n').encode('utf-8')) > MAX_PROJECT_BYTES:
+        raise ValueError('项目数据不能超过 2 MiB。')
+    if path.suffix.lower() == '.bcnproj':
+        data = {'format': PROJECT_FORMAT, 'format_version': PROJECT_FORMAT_VERSION, 'project': data}
+    atomic_json(path, data, overwrite=overwrite)
+
+
+def convert_project(source, destination):
+    source, destination = Path(source).resolve(), Path(destination).resolve()
+    if source == destination or source.suffix.lower() == destination.suffix.lower():
+        raise ValueError('请选择另一种项目格式和不同的保存位置。')
+    project = read_project(source)
+    try:
+        write_project(destination, project, overwrite=False)
+    except FileExistsError:
+        raise ValueError('目标文件已存在，请换一个名称；原文件未修改。') from None
+    return str(destination)
 
 
 def recycle_project(path):
@@ -79,8 +123,8 @@ def recycle_project(path):
     if os.name != 'nt':
         raise OSError('将项目移到系统回收站需要 Windows。')
     path = Path(path).resolve(strict=True)
-    if path.suffix.lower() != '.json' or not path.is_file():
-        raise ValueError('只能删除项目 JSON 文件。')
+    if path.suffix.lower() not in PROJECT_EXTENSIONS or not path.is_file():
+        raise ValueError('只能删除 .bcnproj 或 .json 项目文件。')
     class FileOperation(C.Structure):
         _fields_ = [('hwnd', W.HWND), ('wFunc', W.UINT), ('pFrom', W.LPCWSTR),
                     ('pTo', W.LPCWSTR), ('fFlags', W.WORD), ('fAnyOperationsAborted', W.BOOL),
@@ -106,14 +150,21 @@ def recycle_project(path):
     return True
 
 
-def atomic_json(path, data):
+def atomic_json(path, data, *, overwrite=True):
     path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     name = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=".blitzcam-", suffix=".tmp", delete=False) as f:
             name = f.name; f.write(text); f.flush(); os.fsync(f.fileno())
-        os.replace(name, path)
+        if overwrite:
+            os.replace(name, path)
+        else:
+            # Publish only the complete file, without racing an existence check.
+            if os.name == 'nt':
+                os.rename(name, path)  # Windows refuses to replace an existing file, including on exFAT.
+            else:
+                os.link(name, path)
     finally:
         if name is not None and os.path.exists(name):
             os.unlink(name)

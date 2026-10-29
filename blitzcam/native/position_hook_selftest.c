@@ -84,6 +84,20 @@ static void clock_frame(void){
  ((UpdateFn)(uintptr_t)U(c->functor,0x10))((void*)(uintptr_t)c->player,.016f);tick();
 }
 static void clock_tests(void){
+ /* Long slow motion must finish with the same small table and restore hooks. */
+ for(int full=0;full<=1;full++){
+  clock_fixture(0,1);HookDetach(0);clock_frame();g_shared.status=0;g_shared.detach_mask=0;g_shared.command=0;
+  Config*c=&g_shared.cfg;c->duration=full?120.f:12.377380116447256f;
+  c->play_seconds=c->duration/.0625f;c->schedule_seconds=c->play_seconds;
+  g_shared.points[1].time=c->duration/2;g_shared.points[2].time=c->duration;
+  g_shared.speeds[0].rate=g_shared.speeds[1].rate=.0625f;
+  assert(validate_clock_config());c->play_seconds=1921;assert(!validate_clock_config());c->play_seconds=c->duration/.0625f;
+  assert(HookAttach(0)==0);g_shared.command=1;clock_frame();
+  for(int i=0;i<125000&&g_shared.status==2;i++)clock_frame();
+  assert(g_shared.error==0&&g_shared.status==4&&g_shared.detach_mask==7&&g_shared.clock_restored);
+  assert(fabs(g_shared.replay_elapsed-c->duration)<.03&&g_shared.shooting_elapsed>120);
+ }
+ puts("PASS 198-second and 1920-second slow motion complete with bounded points and clock restoration");
  clock_fixture(0,0);g_shared.command=1;clock_frame();for(int i=0;i<125;i++)clock_frame();
  assert(g_shared.error==0&&fabs(g_shared.replay_elapsed-.5)<.001&&fabs(g_shared.last_elapsed-2)<.001);
  g_shared.command=3;clock_frame();double pos=g_shared.last_elapsed,raw=g_shared.replay_elapsed;

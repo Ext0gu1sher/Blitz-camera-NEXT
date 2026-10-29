@@ -14,7 +14,7 @@ public static class DesktopControlsProbe {
   }
   static void Run(string[] args){
     Directory.CreateDirectory(Path.Combine(args[1],"output"));
-    var host=new Host(args[0],args[1],false);
+    var host=new Host(args[0],args[1],false){GameFeatures=true};
     Native.WinEventProc foregroundCallback=delegate {};
     var foregroundHook=Native.SetWinEventHook(3,3,IntPtr.Zero,foregroundCallback,0,0,0);
     if(foregroundHook==IntPtr.Zero||!Native.UnhookWinEvent(foregroundHook))throw new Exception("Foreground event hook could not be installed and removed");

@@ -1,3 +1,3 @@
 """Blitz Camera Lab: camera capture, path editing and paused position playback."""
 
-__version__ = "0.9.5-beta"
+__version__ = "1.0.1-beta.4"

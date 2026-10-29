@@ -1,14 +1,16 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-edition="next" data-pro-intro="" data-startup-sound="true">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Blitz Camera NEXT · 摄影工作台</title>
-  <style>html,body{background:#171717}#appSplash{position:fixed;inset:0;z-index:10000;background:#171717}</style>
+  <style>html,body{background:#171717}#appSplash{position:fixed;inset:0;z-index:10000;background:#171717}#appSplash[data-edition=pro]{background:#0d0c0e}</style>
   <link rel="stylesheet" href="/startup.css">
   <script src="/startup.js" defer></script>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/deployment.css">
+  <script src="/deployment.js" defer></script>
   <link rel="stylesheet" href="/timeline.css">
   <link rel="stylesheet" href="/replay-open.css">
   <link rel="stylesheet" href="/replay-preview.css">
@@ -26,7 +28,7 @@
   <script src="/app.js" defer></script>
 </head>
 <body class="workbench-060 app-starting">
-  <section id="appSplash" aria-label="Blitz Camera NEXT 正在启动" aria-busy="true">
+  <section id="appSplash" data-edition="next" aria-label="Blitz Camera NEXT 正在启动" aria-busy="true">
     <div class="bc-halo" aria-hidden="true"></div>
     <div class="bc-safe-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <div class="bc-brand">
@@ -38,6 +40,34 @@
       <div class="bc-wordmark"><span>Blitz Camera</span></div>
       <div class="bc-next" aria-label="NEXT"><span>N</span><span>E</span><span>X</span><span>T</span></div>
     </div>
+
+  <div class="pv-shot s1" aria-hidden="true"><div class="pv-cam">
+    <div class="pv-big"><span>每</span><span>一</span><span>帧</span></div>
+    <div class="pv-rule"></div>
+    <div class="pv-cap">Every frame</div>
+  </div></div>
+  <div class="pv-shot s2" aria-hidden="true"><div class="pv-cam">
+    <div class="pv-big"><span>都是</span></div>
+    <div class="pv-cap">is a</div>
+  </div></div>
+  <div class="pv-shot s3" aria-hidden="true"><div class="pv-cam">
+    <div class="pv-big"><i class="pv-block"></i><span>名</span><span>场</span><span>面</span></div>
+    <div class="pv-cap">Highlight</div>
+  </div></div>
+  <div class="pv-shot s4">
+    <div class="pv-ghost" aria-hidden="true">PRO</div>
+    <div class="pv-cam">
+      <div class="pv-logo" aria-label="Blitz Camera Pro">
+        <span class="pv-glyph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94M9.69 8h11.48M7.38 12l5.74-9.94M9.69 16 3.95 6.06M14.31 16H2.83M16.62 12l-5.74 9.94"/></svg></span>
+        <span class="pv-w1">Blitz</span><span class="pv-w2">Camera</span>
+        <span class="pv-pro"><i></i><b>Pro</b></span>
+      </div>
+      <div class="pv-logo-rule"></div>
+    </div>
+
+  </div>
+  <div class="pv-flash" aria-hidden="true"></div>
+  <div class="pv-wipe" aria-hidden="true"></div>
     <div class="bc-loading">
       <div class="bc-loading-rail"><div class="bc-loading-light"></div></div>
       <div class="bc-loading-label" role="status" aria-live="polite">正在准备工作台</div>
@@ -124,7 +154,7 @@
       <button class="ib" id="openOverlay" title="悬浮小窗" aria-label="悬浮小窗"><svg class="ic"><use href="#i-pip"/></svg></button>
       <button class="ib" id="settingsButton" title="设置" aria-label="设置" aria-pressed="false"><svg class="ic"><use href="#i-settings"/></svg></button>
     </div>
-    <span class="version-label">0.9.5 beta · STEAM 11.21</span>
+    <span class="version-label">{{APP_VERSION}}</span>
     <div class="window-controls" id="windowControls" hidden>
       <button class="wc" id="winMin" title="最小化" aria-label="最小化"><svg class="ic"><use href="#i-min"/></svg></button>
       <button class="wc" id="winMax" title="最大化" aria-label="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
@@ -136,11 +166,13 @@
     <aside class="home-side" aria-label="项目导航">
       <button class="home-new" id="homeNew"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span data-label>新建项目</span></button>
       <div class="home-new-row" id="homeNewRow" hidden><input id="homeNewName" placeholder="项目名称" aria-label="项目名称"></div>
+      <button class="home-replay-drop" id="homeReplayDrop" title="拖入页面任意位置，新建项目并关联回放；也可点击选择"><svg class="ic" aria-hidden="true"><use href="#i-film"/></svg><span>从回放新建项目</span><small>拖到页面任意位置<br>.wotbreplay · 或点击选择</small></button>
       <button class="home-link" id="homeOpen"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg><span data-label>打开项目</span></button>
       <nav class="home-nav" aria-label="工作空间"><span class="home-nav-label">工作空间</span><button class="home-nav-item active" id="homeNavHome" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg>项目<span id="homeNavCount" class="home-nav-count"></span></button></nav>
     </aside>
     <section class="home-main">
       <div class="home-heading"><h1 class="home-title" id="homeTitle">项目</h1><span id="homeCount" class="home-count" role="status" aria-live="polite"></span></div>
+      <p class="home-drop-help">将 .wotbreplay 回放拖到页面任意位置，即可新建并关联项目</p>
       <div class="home-toolbar">
         <label class="home-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="homeFilter" type="search" placeholder="搜索项目或回放…" aria-label="搜索项目或回放" autocomplete="off"></label>
         <label class="home-sort"><svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg><select id="homeSort" aria-label="项目排序"><option value="recent">最近使用</option><option value="name-asc">名称 A → Z</option><option value="name-desc">名称 Z → A</option><option value="size">文件大小</option></select></label>
@@ -154,6 +186,7 @@
   </main>
   <div class="home-project-menu" id="homeProjectMenu" role="menu" aria-label="项目操作" hidden>
     <button type="button" role="menuitem" data-home-action="info">项目信息</button>
+    <button type="button" role="menuitem" data-home-action="folder">打开项目所在文件夹</button>
     <button type="button" role="menuitem" class="home-remove" data-home-action="forget">移出最近列表</button>
     <button type="button" role="menuitem" class="home-delete" data-home-action="delete">删除项目…</button>
   </div>
@@ -171,13 +204,29 @@
       <nav class="settings-tabs" aria-label="设置分类">
         <button class="settings-nav active" id="settingsGeneralTab" aria-current="page">常规</button>
         <button class="settings-nav" id="settingsControlsTab">快捷键与控制</button>
+        <button class="settings-nav" id="settingsUpdatesTab">升级包</button>
       </nav>
       <button class="button secondary" id="settingsBack">返回工作台</button>
     </aside>
     <section class="settings-main">
+      <div id="settingsUpdatesPanel" hidden>
+        <h2>升级包</h2>
+        <p class="settings-subtitle">导入本地文件完成更新，项目与设置会保留。</p>
+        <section class="settings-card deployment-card" id="deploymentPanel">
+          <div class="deployment-heading"><h3>部署升级包</h3><span class="deployment-version">当前版本 <span id="deploymentVersion">—</span></span></div>
+          <p class="settings-help">选择发布者提供的升级包。检查通过后，确认部署。</p>
+          <div class="deployment-actions"><button class="button settings-primary" id="deploymentChoose">选择升级包</button><button class="button secondary" id="deploymentExport">导出配置</button></div>
+          <div class="deployment-preview" id="deploymentPreview" hidden>
+            <dl><dt>文件</dt><dd id="deploymentName"></dd><dt>版本</dt><dd id="deploymentTarget"></dd><dt>大小</dt><dd id="deploymentSize"></dd></dl>
+            <p id="deploymentNotes"></p>
+            <button class="button settings-primary" id="deploymentInstall" disabled>部署升级包</button>
+          </div>
+          <p class="settings-result" id="deploymentResult" role="status" aria-live="polite"></p>
+        </section>
+      </div>
       <div id="settingsGeneralPanel">
       <h2>常规</h2>
-      <p class="settings-subtitle">管理项目保存、界面大小和模式二的关键帧起始时间。</p>
+      <p class="settings-subtitle">管理项目保存、界面和模式二的关键帧起始时间。</p>
       <form id="settingsForm" class="settings-card">
         <label class="settings-label" for="projectDirectory">默认项目文件夹</label>
         <p class="settings-help" id="projectDirectoryHelp">主页自动显示此文件夹中的项目；新建项目和“另存为”也默认使用此位置。</p>
@@ -199,12 +248,26 @@
           </div>
           <p class="settings-help" id="battleStartStatus" role="status"></p>
         </div>
+        <div class="settings-section" id="startupSoundSection">
+          <label class="settings-label" for="startupSound">启动音效</label>
+          <p class="settings-help" id="startupSoundHelp">启动动画播放音效，保存后下次启动生效。</p>
+          <select id="startupSound" aria-describedby="startupSoundHelp"><option value="true">开启</option><option value="false">关闭</option></select>
+        </div>
         <div class="settings-save-row">
           <button class="button secondary" type="button" id="settingsDefault">恢复默认</button>
           <span class="settings-result" id="settingsResult" role="status" aria-live="polite"></span>
           <button class="button settings-primary" type="submit" id="settingsSave" disabled>保存设置</button>
         </div>
       </form>
+      <section class="settings-card" id="projectConversion" aria-labelledby="projectConversionTitle">
+        <h2 id="projectConversionTitle">项目格式转换</h2>
+        <p class="settings-help">新项目使用 .bcnproj 格式。选择本地项目并另存为另一种格式，保留全部机位、关键帧、速度曲线、卡点与回放关联。原文件保留；回放和游戏素材不包含在项目内。</p>
+        <div class="settings-inline-row">
+          <button class="button settings-primary" type="button" id="convertToBcn">JSON → BCN 项目</button>
+          <button class="button secondary" type="button" id="convertToJson">BCN 项目 → JSON</button>
+        </div>
+        <p class="settings-result" id="projectConversionResult" role="status" aria-live="polite"></p>
+      </section>
       </div>
       <div id="settingsControlsPanel" hidden>
         <h2>快捷键与控制</h2>
@@ -287,6 +350,7 @@
           <span class="camera-context" id="cameraEditContext" hidden></span>
         </div>
         <div class="tab-pane" id="paneCamera" role="tabpanel">
+          <p class="offline-camera-note">在预览中调整镜头，在时间轴中编辑属性关键帧。</p>
           <div class="prop-grid">
             <span class="pk">状态</span><span class="pv"><i class="status-dot" data-conn-dot></i><span id="telemetryStatus">等待数据</span></span>
             <span class="pk">对局时间</span><span class="pv num-lg"><span id="replayTime">—<small>s</small></span></span>
@@ -353,6 +417,7 @@
           </div>
           <p class="speed-edit-hint" id="speedEditHint">Alt+滚轮缩放 · 滚轮或滚动条平移 · Ctrl+左键 / 双击加点 · Shift 锁定方向 · Alt 微调 · Ctrl+X / C / V 剪切、复制、粘贴</p>
           <div class="speed-readout" id="speedPreviewReadout">—</div>
+          <div class="speed-window-notice" id="speedWindowNotice" hidden></div>
           <div id="speedCurveEditor" hidden>
             <div class="button-row"><label>倍速过渡 <select id="speedInterpolation"><option value="smooth">平滑过渡</option><option value="linear">线性过渡</option></select></label><button class="button secondary" id="addSpeedFrame">＋ 速度关键帧</button></div>
             <div class="table-scroll"><table class="speed-table"><thead><tr><th>拍摄进度 %</th><th>回放倍率 ×</th><th>操作</th></tr></thead><tbody id="speedRows"></tbody></table></div>
@@ -411,7 +476,7 @@
               <button class="view-button" id="previewObserver" aria-pressed="true">路径</button>
               <button class="view-button" id="previewCamera" aria-pressed="false" title="实机镜头画面 16:9" aria-label="实机镜头画面 16:9" disabled>实机</button>
             </div>
-            <button class="ib" id="previewFly" title="自由飞行 · WASD 移动，Q/E 升降，Z/C 逆/顺时针横滚，1–9 调速，空格播放/暂停，←/→ 短按逐帧、长按加速，X 回到主角后方，鼠标转向，滚轮缩放，左键退出" aria-label="自由飞行" aria-pressed="false" hidden disabled><svg class="ic"><use href="#i-fly"/></svg></button>
+            <button class="ib" id="previewFly" title="自由飞行 · WASD 移动，Q/E 升降，Z/C 逆/顺时针横滚，1–9 调速，空格播放/暂停，←/→ 短按逐帧、长按加速，X 回到主角后方（按住跟随），鼠标转向，滚轮缩放，左键退出" aria-label="自由飞行" aria-pressed="false" hidden disabled><svg class="ic"><use href="#i-fly"/></svg></button>
             <span class="override-pill" id="previewOverride" hidden>已调整<button class="ib" id="previewOverrideReset" title="恢复镜头轨迹姿态" aria-label="恢复镜头轨迹姿态"><svg class="ic"><use href="#i-reset"/></svg></button></span>
             <button class="ib" id="previewFit" title="适应路径" aria-label="适应路径"><svg class="ic"><use href="#i-fit"/></svg></button>
             <button class="ib" id="previewRecord" disabled title="将当前镜头的七项属性记录到播放头" aria-label="记录预览镜头"><svg class="ic"><use href="#i-record"/></svg></button>
@@ -424,7 +489,7 @@
         <div class="canvas-wrap" id="canvasWrap">
           <canvas id="pathCanvas" aria-label="网格上的离线摄像机轨迹预览；可拖动三维视图，滚轮缩放"></canvas>
           <div class="canvas-empty" id="canvasEmpty"><svg class="ic"><use href="#i-path"/></svg><p>记录属性关键帧，或导入轨迹。</p></div>
-          <div id="replayScene" hidden><div id="previewEmpty" role="button" tabindex="-1" aria-disabled="true" title="选择回放文件"><svg class="ic"><use href="#i-folder"/></svg><span data-label>载入回放</span><div class="pe-progress" data-progress hidden><i></i></div><span class="pe-msg" data-msg></span></div><div class="preview-scene-hud"><span id="previewMap"></span><span id="previewSceneTime"></span></div><div class="preview-flight-hud" id="previewFlightHud" hidden><i class="flight-reticle"></i><span data-flight-hint></span><span data-flight-hint></span><span data-flight-hint></span><b id="previewFlightSpeed">4 档</b></div></div>
+          <div id="replayScene" hidden><div id="previewEmpty" role="button" tabindex="-1" aria-disabled="true" title="选择回放文件"><svg class="ic"><use href="#i-folder"/></svg><span data-label>载入回放</span><span class="replay-drop-hint" id="previewDropHint">拖入回放文件，打开并关联<br><small>.wotbreplay · 或点击选择</small></span><div class="pe-progress" data-progress hidden><i></i></div><span class="pe-msg" data-msg></span></div><div class="preview-scene-hud"><span id="previewMap"></span><div class="preview-camera-hud"><span id="previewSceneTime"></span><div class="preview-camera-metrics" aria-label="实时镜头参数"><span id="previewCameraSpeed" title="镜头实际移动速度，包含预演倍率；跳转和复位不计入">镜头 — m/s</span><span id="previewCameraFov" title="镜头水平视场角">FOV —°</span></div></div></div><div class="preview-flight-hud" id="previewFlightHud" hidden><i class="flight-reticle"></i><span data-flight-hint></span><span data-flight-hint></span><span data-flight-hint></span><b id="previewFlightSpeed">4 档</b></div></div>
           <span class="draft-note" id="draftPreviewNote" hidden>草稿未保存 · 预演当前草稿</span>
         </div>
         <div class="transport">

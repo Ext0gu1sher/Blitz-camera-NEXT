@@ -18,11 +18,11 @@ OUT = ROOT / 'output/keyframe-clipboard-native-acceptance'
 
 PAGE = r'''<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/timeline.css">
 <style>body{background:#191919;color:#ddd}#editor{display:flex;flex-direction:column;width:1000px;height:400px}.ic{width:12px;height:12px}</style>
-<div id="editor"></div><div id="inspector"><span data-selection></span><span data-time-label></span><input data-field="time"><span data-value-label></span><input data-field="value"></div><input id="plain" value="BlitzCamera isolated native input">
+<div id="editor"></div><div id="inspector"><span data-selection></span><span data-time-label></span><input data-field="time"><span data-value-label></span><input data-field="value"></div><button id="workbenchButton">Other workbench control</button><input id="workbenchRange" type="range"><input id="plain" value="BlitzCamera isolated native input">
 <script src="/preview-time.js"></script><script src="/keyframe-clipboard.js"></script><script src="/timeline.js"></script>
 <script>
 window.notices=[];window.changes=[];window.pastes=[];window.copies=[];
-window.editor=new BlitzTimeline.Editor(document.getElementById('editor'),{inspector:document.getElementById('inspector'),change:d=>changes.push(d),seek:()=>{},error:m=>notices.push(m)});
+window.editor=new BlitzTimeline.Editor(document.getElementById('editor'),{inspector:document.getElementById('inspector'),clipboardScope:target=>target===document.body||!!target.closest('#workbenchButton,#workbenchRange'),change:d=>changes.push(d),seek:()=>{},error:m=>notices.push(m)});
 const tracks=Object.fromEntries(BlitzTimeline.CHANNELS.map(([name])=>[name,[2,6].map(time_sec=>({time_sec,value:name==='zoom'?60:name==='x'?17:name==='y'?27:0}))]));
 editor.load(tracks,{mode:'paused',rate:1,keyframes:[{progress:0,rate:1},{progress:1,rate:1}]});
 editor.selected=new Set([editor.doc.tracks.x[0]._id,editor.doc.tracks.y[1]._id]);editor.updatePlayhead(10);editor.render();

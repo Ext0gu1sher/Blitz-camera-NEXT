@@ -28,7 +28,7 @@
 
 - Python：223 项测试通过，含 Steam 清单与路径核对、无 shell 的独立参数、已有游戏时拒绝、取消选择、非法文件、异步与重复请求、播放期间禁止打开、失败保留项目、短文件不删除旧机位、启动参数匹配/不匹配、重新建轨迹，以及原生文件对话框结构/Unicode 缓冲区的模拟调用。
 - `python -X utf8 -B -m tools.test_overlay_ui` 全部通过：原有悬浮窗与七轨时间轴回归、整场时间轴验收，以及新增文件入口验收。全部使用临时项目、合成回放、模拟选择器与模拟启动器，不启动游戏。
-- 新 UI 验收：`output/replay-open-071-acceptance/result.json`、`open-file-workbench.png`、`open-file-overlay.png`。两张图已查看。830×102 原生内容区中打开按钮完整，页脚底部 84.5 像素，页面横向宽度 830 像素。
+- 新 UI 验收：`output/archive/2026-10-27/verification/replay-open-071-acceptance/result.json`、`open-file-workbench.png`、`open-file-overlay.png`。两张图已查看。830×102 原生内容区中打开按钮完整，页脚底部 84.5 像素，页面横向宽度 830 像素。
 - 只读安装发现实测返回已知 Steam 国际版路径；进程枚举实测返回空列表。未打开实际文件选择窗口，未验证游戏本次真实启动与加载。
 
 实际验收：退出游戏 → 在工作台或浮窗点击打开 → 选择当前客户端可播放的回放 → 检查游戏载入和工具显示的文件名/总时长 → 切自由镜头并暂停 → 点击连接并核对来源。进入游戏后文件身份与画面仍需这轮实际验收。
@@ -37,4 +37,4 @@
 
 服务已更新至 `http://127.0.0.1:56593/` 的 0.7.1，PID 62932；悬浮外壳 PID 72068，四个面板均 ready。只读检查新入口、样式返回正常，服务错误日志为空。部署前后用户项目 SHA-256 保持 `539431cd91e791a1948350a56f37978858afef160717fd0ee5a8e075900f998e`，原生 Hook SHA-256 保持 `645ea86876635210427b430278659c046f4803daebcf1febaa89a0c5464d7a9c`。
 
-部署后的只读检查发现已有文件选择请求处于 `choosing`，尚未取得真实启动/载入结果。记录见 `output/replay-open-071-live-readonly-smoke.json`。没有通过测试脚本向生产服务发送打开文件请求。
+部署后的只读检查发现已有文件选择请求处于 `choosing`，尚未取得真实启动/载入结果。记录见 `output/archive/2026-10-27/research/replay-open-071-live-readonly-smoke.json`。没有通过测试脚本向生产服务发送打开文件请求。

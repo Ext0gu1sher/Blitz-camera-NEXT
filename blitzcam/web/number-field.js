@@ -10,6 +10,7 @@
   const attr=(el,name,value)=>{value=String(value);if(el.getAttribute(name)!==value)el.setAttribute(name,value);};
   const stepOf=widget=>typeof widget.options.step==='function'?widget.options.step():widget.options.step??Number(widget.input.dataset.scrubStep||widget.input.step||1);
   const factor=e=>e.shiftKey ? .1 : e.ctrlKey||e.metaKey ? 10 : 1;
+  const quantize=(widget,v)=>Number(v.toFixed(widget.options.decimals??6));
   function limits(widget){
     const custom=widget.options.bounds?.()||{};
     return {min:custom.min??(widget.input.min===''?-1e7:Number(widget.input.min)),max:custom.max??(widget.input.max===''?1e7:Number(widget.input.max))};
@@ -45,6 +46,7 @@
   }
   function write(widget,value,typed=false){
     const {input,options}=widget,bounds=limits(widget);
+    if(options.decimals!=null&&Number.isFinite(value))value=quantize(widget,value);
     if(!Number.isFinite(value)||value<bounds.min||value>bounds.max){input.setAttribute('aria-invalid','true');return false;}
     const previous=active?.widget===widget?active.last:input.value;
     input.removeAttribute('aria-invalid');widget.writing=true;
@@ -102,7 +104,8 @@
     if(active?.widget===widget)flush();else finish();
     const actual=widget.options.get?.()??widget.input.value;if(!finite(actual))return;
     widget.input.value=String(actual);begin(widget,'step');
-    const b=limits(widget),value=Math.max(b.min,Math.min(b.max,Number(actual)+direction*stepOf(widget)*factor(e)));
+    const b=limits(widget),amount=Math.max(stepOf(widget)*factor(e),widget.options.decimals!=null?10**-widget.options.decimals:0);
+    const value=Math.max(b.min,Math.min(b.max,Number(actual)+direction*amount));
     if(value!==Number(actual))write(widget,Number(value.toFixed(12)));
     finish();
   }
@@ -145,8 +148,9 @@
       const step=stepOf(widget);
       const delta=drag.axis==='y'?drag.lastY-e.clientY:e.clientX-drag.lastX;drag.lastX=e.clientX;drag.lastY=e.clientY;
       if(delta===0)return;
-      const bounds=limits(widget),base=pending?.widget===widget?pending.value:Number(active.last||0),value=base+delta*step*factor(e);
-      queue(widget,Math.max(bounds.min,Math.min(bounds.max,Number(value.toFixed(6)))));
+      const bounds=limits(widget),rounded=widget.options.decimals!=null,base=rounded?drag.raw??Number(active.last||0):pending?.widget===widget?pending.value:Number(active.last||0),value=Math.max(bounds.min,Math.min(bounds.max,base+delta*step*factor(e)));
+      if(rounded)drag.raw=value;
+      queue(widget,rounded?quantize(widget,value):Number(value.toFixed(6)));
     });
     // Capture can be dropped by the desktop host before pointerup arrives.
     // Only an explicit cancel/Escape rolls back an otherwise valid edit.

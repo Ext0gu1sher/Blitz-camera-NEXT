@@ -132,7 +132,12 @@
     rateDisplay(p,map=this.map()){return this.displayTime(map.rateTime(p),map);}
     x(time,map){return 14+this.displayTime(time,map)*this.scale;}
     fit(){if(!this.doc)return;this.pendingFit=this.scroll.clientWidth<=0;if(this.pendingFit)return;this.scale=clamp((this.scroll.clientWidth-32)/Math.max(.5,this.free()?Math.max(10,...Object.values(this.doc.tracks).flat().map(k=>k.time_sec)):this.total()),.000001,1000);this.scroll.scrollLeft=0;this.render();}
-    zoom(factor,anchor=this.scroll.clientWidth/2,at=(this.scroll.scrollLeft+anchor-14)/this.scale){this.scale=clamp(this.scale*factor,.000001,2000);this.render();this.scroll.scrollLeft=14+at*this.scale-anchor;}
+    minScale(){const span=this.free()?Math.max(600,...Object.values(this.doc.tracks).flat().map(k=>k.time_sec)):this.total();return clamp((this.scroll.clientWidth-32)/Math.max(.5,span),.000001,2000);}
+    zoom(factor,anchor=this.scroll.clientWidth/2,at=(this.scroll.scrollLeft+anchor-14)/this.scale){
+      if(!this.doc)return;this.scale=clamp(this.scale*factor,Math.min(this.scale,this.minScale()),2000);
+      if(this.free())this.grow(Math.max(0,at)+this.scroll.clientWidth/this.scale);
+      this.render();this.scroll.scrollLeft=14+at*this.scale-anchor;
+    }
     render(){
       if(!this.doc)return;const map=this.free()||this.drag?.rate?this.map():this.drag?.map||this.map(),total=this.total(map),width=Math.max(this.scroll.clientWidth-1,28+total*this.scale),height=this.height();
       this.root.classList.toggle('seq-camera-only',this.free());this.content.style.height=height+'px';this.head.style.height=height+'px';
@@ -255,15 +260,21 @@
     }
     snapshot(){return clone(this.doc);}
     clipboardBusy(){return !!(this.drag||this.numberEdit||this.adapter.clipboardBusy?.());}
-    clipboardScope(target){
-      if(!target?.closest||target.closest('input,textarea,select,[contenteditable]:not([contenteditable=false])'))return false;
-      return this.root.contains(target)||this.inspectorRoot.contains(target)||!!this.adapter.clipboardScope?.(target);
+    clipboardScope(target,cut=false){
+      if(!target?.closest||target.closest('textarea,select,[contenteditable]:not([contenteditable=false])'))return false;
+      const input=target.closest('input');
+      // Text and numeric editing owns the native clipboard; controls such as a
+      // range slider or checkbox do not edit text and can retain editor focus.
+      // Cutting remains restricted to the original editor scope.
+      if(input&&(cut||!['range','checkbox','radio','button','submit','reset'].includes(input.type)))return false;
+      const extraScope=cut?(this.adapter.clipboardCutScope||this.adapter.clipboardScope):this.adapter.clipboardScope;
+      return this.root.contains(target)||this.inspectorRoot.contains(target)||!!extraScope?.(target);
     }
-    clipboardEventScope(event){
+    clipboardEventScope(event,cut=false){
       const doc=this.root.ownerDocument,target=event.target;
       // WebView2 can dispatch native clipboard events on BODY even while an
       // editor control owns keyboard focus. Text fields still keep their scope.
-      return this.clipboardScope(target===doc||target===doc.body||target===doc.documentElement?doc.activeElement:target);
+      return this.clipboardScope(target===doc||target===doc.body||target===doc.documentElement?doc.activeElement:target,cut);
     }
     updateClipboardButtons(){
       const busy=this.clipboardBusy();
@@ -319,7 +330,7 @@
       }catch(error){this.doc=before;this.selected=selection;this.clipboard=previousClipboard;this.render();this.adapter.error(error.message);return false;}
     }
     onClipboardCut(event){
-      if(event.defaultPrevented||(!this.cutRequested&&!this.clipboardEventScope(event))||this.clipboardBusy())return;
+      if(event.defaultPrevented||(!this.cutRequested&&!this.clipboardEventScope(event,true))||this.clipboardBusy())return;
       if(!this.cutRequested&&!this.root.ownerDocument.getSelection()?.isCollapsed)return;
       this.cutHandled=true;event.preventDefault();
       this.cutKeyframes(payload=>{
@@ -430,7 +441,8 @@
       if(name==='fit')return this.fit();if(name==='in'||name==='out')return this.zoom(name==='in'?1.25:.8);
       if(name==='snap'){this.snap=!this.snap;this.root.querySelector('[data-action=snap]').setAttribute('aria-pressed',String(this.snap));return;}
       if(name==='previous'||name==='next'){
-        const times=[...new Set(Object.values(this.doc.tracks).flat().map(k=>k.time_sec))].sort((a,b)=>a-b),t=name==='next'?times.find(t=>t>this.playhead+1e-6):times.filter(t=>t<this.playhead-1e-6).at(-1);
+        const map=this.map(),rates=!this.free()&&this.doc.speed.mode==='curve'&&Timing.valid(this.doc.speed)?this.doc.speed.keyframes.map(k=>map.rateTime(k.progress)):[];
+        const times=[...new Set([...Object.values(this.doc.tracks).flat().map(k=>k.time_sec),...rates])].sort((a,b)=>a-b),t=name==='next'?times.find(t=>t>this.playhead+1e-6):times.filter(t=>t<this.playhead-1e-6).at(-1);
         if(t!==undefined)this.adapter.seek(t);return;
       }
       if(this.locked)return;
@@ -473,7 +485,8 @@
     }
     snapTargets(exclude,map=this.map(),includePlayhead=true,skipRow=null){
       const targets=[0,this.displayTime(map.workStart,map),this.displayTime(map.workEnd,map)];
-      for(const row of this.rows())if(row.name!=='rate'&&row.name!==skipRow)for(const k of row.keys){if(exclude?.has(k._id))continue;targets.push(this.displayTime(k.time_sec,map));}
+      const curve=this.doc.speed.mode==='curve'&&Timing.valid(this.doc.speed);
+      for(const row of this.rows())if(row.name!==skipRow&&(row.name!=='rate'||curve))for(const k of row.keys){if(exclude?.has(k._id))continue;targets.push(row.name==='rate'?this.rateDisplay(k.progress,map):this.displayTime(k.time_sec,map));}
       if(includePlayhead)targets.push(this.displayTime(this.playhead,map));
       targets.beats=this.beatGrid(map);targets.map=map;
       return targets;

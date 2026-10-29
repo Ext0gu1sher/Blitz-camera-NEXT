@@ -11,7 +11,7 @@ import zipfile
 
 from blitzcam import replay_launcher as launcher
 from blitzcam.profile import CameraError, SessionChanged
-from blitzcam.server import Workstation
+from tests.fixtures.game_workstation import Workstation
 from tests.test_replay_events import arena_payload, data_with_events
 
 
@@ -30,19 +30,19 @@ class ReplayLauncherTests(unittest.TestCase):
         info=SimpleNamespace(pid=65388,path=Path('wotblitz.exe'))
         launch={'pid':64604,'executable':'wotblitz.exe',
                 'info':{'replay_file':'original.wotbreplay','replay_sha256':'a'*64}}
-        candidate={'replay_file':'copied.wotbreplay','replay_sha256':'a'*64}
-        self.assertEqual(launcher.verify_launch_source(info,launch,candidate)['verification'],'launch_arguments')
+        candidate={'replay_file':'copied.wotbreplay','replay_sha256':'a'*64,'verification':'runtime_replay'}
+        self.assertEqual(launcher.verify_launch_source(info,launch,candidate)['verification'],'runtime_replay')
         with self.assertRaises(CameraError):
             launcher.verify_launch_source(info,launch,{**candidate,'replay_sha256':'b'*64})
 
     def test_handoff_checks_executable_and_file_instead_of_original_pid(self):
         info=SimpleNamespace(pid=65388,path=Path('wotblitz.exe'))
         launch={'pid':64604,'executable':'wotblitz.exe','info':{'replay_file':'chosen.wotbreplay'}}
-        result=launcher.verify_launch_source(info,launch,{'replay_file':'chosen.wotbreplay'})
+        result=launcher.verify_launch_source(info,launch,{'replay_file':'chosen.wotbreplay','verification':'runtime_replay'})
         self.assertTrue(result['process_handoff'])
         self.assertEqual(result['connected_pid'],65388)
         with self.assertRaisesRegex(CameraError,'回放与本次选择不一致'):
-            launcher.verify_launch_source(info,launch,{'replay_file':'other.wotbreplay'})
+            launcher.verify_launch_source(info,launch,{'replay_file':'other.wotbreplay','verification':'runtime_replay'})
         with self.assertRaisesRegex(CameraError,'安装位置'):
             launcher.verify_launch_source(SimpleNamespace(pid=65388,path=Path('other/wotblitz.exe')),launch,{'replay_file':'chosen.wotbreplay'})
         with self.assertRaisesRegex(CameraError,'无法读取.*回放文件.*fixture read error'):
@@ -57,6 +57,12 @@ class ReplayLauncherTests(unittest.TestCase):
             self.assertEqual(dialog.call_args.kwargs['filters'][0][1], '*.wotbreplay')
             dialog.return_value = Path(r'C:\回放\A B.wotbreplay')
             self.assertEqual(launcher.choose_replay(), dialog.return_value)
+
+    def test_file_selection_alone_is_not_current_replay_evidence(self):
+        info=SimpleNamespace(pid=1,path=Path('wotblitz.exe'))
+        launch={'executable':'wotblitz.exe','info':{'replay_file':'selected.wotbreplay'}}
+        with self.assertRaises(launcher.ReplaySourceUnavailable):
+            launcher.verify_launch_source(info,launch,dict(launch['info']))
 
     def test_client_requires_matching_steam_app_manifest(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -234,24 +240,24 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
         self.assertIn('时间轴未改动', state['replay_launch']['message'])
         self.assertEqual(state['project'], before)
 
-    def test_connection_checks_launch_process_and_argument_but_never_assumes_later_switches(self):
+    def test_connection_checks_runtime_file_after_process_handoff(self):
         self.app.open_replay(str(self.replay)); state = await_state(self.app, {'launched'})
         session = Mock(); session.memory.info.pid = self.process.pid
         session.memory.info.path = Path('wotblitz.exe')
-        candidate = {**state['replay_launch']['info'], 'source':'launch_argument'}
+        candidate = {**state['replay_launch']['info'], 'source':'runtime_replay','verification':'runtime_replay'}
         with patch('blitzcam.server.CameraSession.connect',return_value=session), \
              patch('blitzcam.server.session_timeline',return_value=candidate):
             self.app.connect()
             deadline = time.monotonic()+3
             while self.app.connection['state']=='connecting' and time.monotonic()<deadline: time.sleep(.01)
         self.assertTrue(self.app.replay_launch['verified'])
-        self.assertEqual(self.app.replay_info['verification'],'launch_arguments')
+        self.assertEqual(self.app.replay_info['verification'],'runtime_replay')
 
     def test_exited_launcher_with_same_file_in_new_process_connects(self):
         self.app.open_replay(str(self.replay)); state=await_state(self.app,{'launched'})
         self.process.poll=Mock(return_value=0)
         session=Mock();session.memory.info.pid=65388;session.memory.info.path=Path('wotblitz.exe')
-        candidate={**state['replay_launch']['info'],'source':'launch_argument'}
+        candidate={**state['replay_launch']['info'],'source':'runtime_replay','verification':'runtime_replay'}
         with patch('blitzcam.server.CameraSession.connect',return_value=session), \
              patch('blitzcam.server.session_timeline',return_value=candidate):
             self.app.connect()
@@ -263,7 +269,7 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
         self.assertEqual(self.app.replay_launch['connected_pid'],65388)
         self.process.poll.assert_not_called()
 
-    def test_mismatched_launch_argument_does_not_connect_under_wrong_file_identity(self):
+    def test_unverified_file_is_not_promoted_to_a_verified_launch(self):
         self.app.open_replay(str(self.replay)); await_state(self.app, {'launched'})
         session=Mock();session.memory.info.pid=self.process.pid;session.memory.info.path=Path('wotblitz.exe')
         with patch('blitzcam.server.CameraSession.connect',return_value=session), \
@@ -271,10 +277,11 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
             self.app.connect()
             deadline=time.monotonic()+3
             while self.app.connection['state']=='connecting' and time.monotonic()<deadline:time.sleep(.01)
-        self.assertEqual(self.app.connection['state'],'error')
-        self.assertIsNone(self.app.session)
+        self.assertEqual(self.app.connection['state'],'connected')
+        self.assertIs(self.app.session,session)
         self.assertFalse(self.app.replay_launch['verified'])
-        session.close.assert_called_once()
+        self.assertEqual(self.app.replay_launch['source_state'],'unavailable')
+        session.close.assert_not_called()
 
     def connect_session(self, session, candidate=None, error=None):
         with patch('blitzcam.server.CameraSession.connect', return_value=session), \
@@ -296,7 +303,7 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
     def invalidated_replay(self):
         self.app.open_replay(str(self.replay))
         state = await_state(self.app, {'launched'})
-        candidate = {**state['replay_launch']['info'], 'source': 'launch_argument'}
+        candidate = {**state['replay_launch']['info'], 'source': 'runtime_replay', 'verification':'runtime_replay'}
         first = self.camera_session()
         self.connect_session(first, candidate)
         first.capture.side_effect = SessionChanged('回放对象已改变，请重新连接。')
@@ -319,20 +326,20 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
         self.assertNotIn('已改变', state['replay_launch']['message'])
         self.assertNotIn('source_warning', state['connection'])
 
-    def test_reconnect_invalidated_source_still_rejects_a_different_file(self):
+    def test_reconnect_unverified_source_cannot_restore_old_verification(self):
         self.invalidated_replay()
         session = self.camera_session()
         self.connect_session(session, {'replay_file': str(self.root/'other.wotbreplay')})
-        self.assertEqual(self.app.connection['state'], 'error')
-        self.assertIsNone(self.app.session)
+        self.assertEqual(self.app.connection['state'], 'connected')
+        self.assertIs(self.app.session, session)
         self.assertFalse(self.app.replay_launch['verified'])
-        self.assertIn('不一致', self.app.connection['message'])
-        session.close.assert_called_once()
+        self.assertEqual(self.app.replay_launch['source_state'], 'unavailable')
+        session.close.assert_not_called()
 
-    def test_reconnect_invalidated_source_without_arguments_reports_current_warning(self):
+    def test_reconnect_invalidated_source_without_file_source_reports_current_warning(self):
         self.invalidated_replay()
         session = self.camera_session()
-        self.connect_session(session, error=ValueError('no replay argument'))
+        self.connect_session(session, error=ValueError('当前回放文件读取暂不可用'))
         self.assertEqual(self.app.connection['state'], 'connected')
         self.assertEqual(self.app.replay_launch['state'], 'launched')
         self.assertFalse(self.app.replay_launch['verified'])
@@ -346,14 +353,14 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
         self.app.open_replay(str(self.replay)); await_state(self.app, {'launched'})
         before = self.app.project.to_dict()
         session = self.camera_session()
-        self.connect_session(session, error=ValueError('启动参数没有唯一回放文件。'))
+        self.connect_session(session, error=ValueError('当前回放文件对象暂不可读。'))
         self.assertEqual(self.app.connection['state'], 'connected')
         self.assertIs(self.app.session, session)
         self.assertIsNone(self.app.replay_info)
         self.assertFalse(self.app.replay_launch['verified'])
         self.assertEqual(self.app.replay_launch['source_state'], 'unavailable')
         self.assertIn('加载稳定后重新连接', self.app.connection['message'])
-        self.assertIn('唯一回放文件', self.app.replay_launch['source_error'])
+        self.assertIn('文件对象暂不可读', self.app.replay_launch['source_error'])
         self.assertEqual(self.app.project.to_dict(), before)
         session.close.assert_not_called()
         # A subsequent successful camera poll must not erase the source warning.
@@ -363,14 +370,14 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
         self.app.new_project()
         self.assertEqual(self.app.project.keyframe_times(), [2])
 
-    def test_reconnect_does_not_reuse_an_earlier_verified_file_when_arguments_disappear(self):
+    def test_reconnect_does_not_reuse_an_earlier_verified_file_when_source_disappears(self):
         self.app.open_replay(str(self.replay)); state = await_state(self.app, {'launched'})
         first = self.camera_session()
-        candidate = {**state['replay_launch']['info'], 'source': 'launch_argument'}
+        candidate = {**state['replay_launch']['info'], 'source': 'runtime_replay', 'verification':'runtime_replay'}
         self.connect_session(first, candidate)
         self.assertTrue(self.app.replay_launch['verified'])
         second = self.camera_session()
-        self.connect_session(second, error=ValueError('no replay argument'))
+        self.connect_session(second, error=ValueError('当前回放文件读取暂不可用'))
         self.assertEqual(self.app.connection['state'], 'connected')
         first.close.assert_called_once()
         second.close.assert_not_called()
@@ -385,16 +392,16 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
         self.assertNotIn('source_error', self.app.replay_launch)
         self.assertNotIn('source_warning', self.app.connection)
 
-    def test_missing_arguments_allow_independent_camera_playback_but_not_bound_replay_playback(self):
+    def test_missing_source_allow_independent_camera_playback_but_not_bound_replay_playback(self):
         from blitzcam.project import validate_project
         self.app.open_replay(str(self.replay)); await_state(self.app, {'launched'})
         session = self.camera_session()
-        self.connect_session(session, error=ValueError('no replay argument'))
+        self.connect_session(session, error=ValueError('当前回放文件读取暂不可用'))
         self.app.project = validate_project({
             'shooting_mode': 'replay', 'replay_timeline': self.app.project.replay_timeline,
             'keyframes': [dict(time_sec=t, position=[t, 0, 20], quaternion=[1, 0, 0, 0],
                                horizontal_fov_deg=60) for t in (0, 8)]})
-        with patch('blitzcam.replay_map.launch_replay_path', side_effect=ValueError('no replay argument')), \
+        with patch('blitzcam.replay_source.runtime_replay_source', side_effect=ValueError('当前回放文件读取暂不可用')), \
              patch.object(self.app.playback, 'start') as start:
             for options in ({}, {'mode': 'current'}, {'mode': 'prepare'}, {'mode': 'locate'},
                             {'reverse': True}, {'speed_only': True}):
@@ -406,11 +413,11 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
             self.app.play()
             start.assert_called_once()
 
-    def test_missing_arguments_do_not_bypass_installation_identity(self):
+    def test_missing_source_do_not_bypass_installation_identity(self):
         self.app.open_replay(str(self.replay)); await_state(self.app, {'launched'})
         session = self.camera_session()
         session.memory.info.path = Path('different/wotblitz.exe')
-        self.connect_session(session, error=ValueError('no replay argument'))
+        self.connect_session(session, error=ValueError('当前回放文件读取暂不可用'))
         self.assertEqual(self.app.connection['state'], 'error')
         self.assertIsNone(self.app.session)
         session.close.assert_called_once()
@@ -468,6 +475,25 @@ class ReplayOpenWorkflowTests(unittest.TestCase):
             with self.assertRaisesRegex(CameraError, '与项目绑定不一致'):
                 self.app.play()
             start.assert_not_called()
+
+    def test_project_switch_drops_previous_launch_request_before_reconnecting(self):
+        from blitzcam.project import validate_project, write_project
+        self.app.open_replay(str(self.replay)); await_state(self.app, {'launched'})
+        old_launch=self.app.replay_launch['id']
+        other=self.root/'project-b.json'
+        current={'replay_file':str(self.root/'replay-b.wotbreplay'),'replay_sha256':'b'*64,
+                 'source':'runtime_replay','verification':'runtime_replay','duration_sec':305.66}
+        data=self.app.project.to_dict()
+        data['replay_timeline'].update(replay_file=current['replay_file'],replay_sha256=current['replay_sha256'])
+        write_project(other,validate_project(data))
+        self.app.open_project(other)
+        session=self.camera_session()
+        self.connect_session(session,current)
+        self.assertEqual(self.app.connection['state'],'connected')
+        self.assertNotEqual(self.app.replay_launch.get('id'),old_launch)
+        self.assertEqual(self.app.replay_info['replay_sha256'],'b'*64)
+        self.assertEqual(self.app.project.replay_timeline['replay_sha256'],'b'*64)
+        session.close.assert_not_called()
 
     def test_new_path_uses_verified_opened_file_after_old_keys_failed_to_fit(self):
         self.app.session=Mock()

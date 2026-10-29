@@ -1,0 +1,16 @@
+{
+  "MicrosoftEdgeWebview2Setup.exe": {
+    "source": "https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+    "signer": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+    "sha256": "ca4c9016c70e2184c5e231662e0e98abf4826647180ef3faab32fcb1ca2ec15e"
+  },
+  "innosetup-6.7.3.exe": {
+    "source": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe",
+    "signer": "CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL",
+    "sha256": "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
+  },
+  "ChineseSimplified.isl": {
+    "sha256": "e0b0b350e2245f3c5e65586dfe43d574f6e7f06f2261149aba284954b3fc9a8d",
+    "source": "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl"
+  }
+}

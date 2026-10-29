@@ -1,5 +1,6 @@
 """Read archived NewReplayFile objects; no live processes or game writes."""
 from dataclasses import replace
+import ctypes as C
 import json
 from pathlib import Path
 import struct
@@ -25,7 +26,7 @@ def put(memory, address, data):
     raise AssertionError('Fixture write outside archived blocks')
 
 
-def source_fixture(path, kind='CinemaCameraController'):
+def source_fixture(path, kind='CinemaCameraController', *, pointer_owner=False):
     archive = json.loads((Path(__file__).parent/'fixtures/1121-replay-source.json').read_text(encoding='utf-8'))
     memory = controller_fixture(kind, base=int(archive['module_base'], 16))
     memory.blocks.update({int(p,16):bytes.fromhex(b) for p,b in archive['blocks'].items()})
@@ -38,6 +39,13 @@ def source_fixture(path, kind='CinemaCameraController'):
     pointer = 0x60000000
     memory.blocks[pointer] = encoded + b'\0'
     put(memory, source, struct.pack('<4I', pointer,0,0,0) + struct.pack('<II',len(encoded),len(encoded)|15))
+    if pointer_owner:
+        # Live 11.21 observation: _Ref_count_resource holds a separate file at
+        # +0xC, unlike the archived make_shared inline owner.
+        holder = 0x60001000
+        memory.blocks[holder] = struct.pack('<4I',
+            session.live(session.profile.replay_file_pointer_holder_vft), 4, 1, source)
+        put(memory, session.objects.player + 0xEC, struct.pack('<I', holder))
     return session
 
 
@@ -54,21 +62,50 @@ class RuntimeReplaySourceTests(unittest.TestCase):
 
     def test_actual_file_is_identified_for_both_camera_types_without_arguments(self):
         for kind in ('CinemaCameraController','SpectatorCameraController'):
-            with self.subTest(kind=kind):
-                session = source_fixture(self.path, kind)
-                with patch('blitzcam.replay_map.launch_replay_path', side_effect=AssertionError('argv must not be needed')):
-                    actual = session_timeline(session)
-                self.assertEqual(actual['replay_file'],str(self.path.resolve()))
-                self.assertEqual(actual['verification'],'runtime_replay')
-                self.assertTrue(replay_matches(file_timeline(self.path),actual))
-                self.assertEqual(session.capture()['native_controller']['kind'],kind)
+            for pointer_owner in (False, True):
+                with self.subTest(kind=kind, pointer_owner=pointer_owner):
+                    session = source_fixture(self.path, kind, pointer_owner=pointer_owner)
+                    with patch.object(C, 'WinDLL', side_effect=AssertionError('process arguments must not be read')):
+                        actual = session_timeline(session)
+                    self.assertEqual(actual['replay_file'],str(self.path.resolve()))
+                    self.assertEqual(actual['verification'],'runtime_replay')
+                    self.assertTrue(replay_matches(file_timeline(self.path),actual))
+                    self.assertEqual(session.capture()['native_controller']['kind'],kind)
 
-    def test_runtime_file_wins_over_a_different_stale_startup_argument(self):
+    def test_pointer_owner_requires_exact_type_live_counts_and_matching_resource(self):
+        for change in ('type', 'inline_type', 'resource', 'strong', 'weak'):
+            with self.subTest(change=change):
+                session = source_fixture(self.path, pointer_owner=True)
+                owner = runtime_replay_source(session).holder
+                offset = {'type': 0, 'inline_type': 0, 'resource': 12, 'strong': 4, 'weak': 8}[change]
+                value = session.live(session.profile.replay_file_holder_vft) if change == 'inline_type' else 0
+                put(session.memory, owner + offset, struct.pack('<I', value))
+                with patch.object(C, 'WinDLL') as native:
+                    with self.assertRaises(ReplaySourceUnavailable):
+                        session_timeline(session)
+                native.assert_not_called()
+
+    def test_pointer_owner_resource_is_rechecked_after_reading_metadata(self):
+        session = source_fixture(self.path, pointer_owner=True)
+        owner = runtime_replay_source(session).holder
+        guard = session._guard
+        calls = 0
+        def switch():
+            nonlocal calls
+            guard()
+            calls += 1
+            if calls == 2:
+                put(session.memory, owner + 12, struct.pack('<I', 0x60002000))
+        with patch.object(session, '_guard', side_effect=switch):
+            with self.assertRaisesRegex(ValueError, '持有关系无效'):
+                runtime_replay_source(session)
+
+    def test_active_file_is_read_without_querying_process_arguments(self):
         other = self.root/'old.wotbreplay'
         other.write_bytes(b'previous launch')
-        with patch('blitzcam.replay_map.launch_replay_path', return_value=other) as arguments:
+        with patch.object(C, 'WinDLL') as native:
             actual = session_timeline(source_fixture(self.path))
-        arguments.assert_not_called()
+        native.assert_not_called()
         self.assertFalse(replay_matches({'replay_file':str(other)},actual))
 
     def test_corrupt_type_or_links_do_not_fall_back_to_launch_arguments(self):
@@ -84,10 +121,10 @@ class RuntimeReplaySourceTests(unittest.TestCase):
                     put(session.memory,pointer,b'0')
                 else:
                     put(session.memory,targets[change],b'\0'*4)
-                with patch('blitzcam.replay_map.launch_replay_path',return_value=self.path) as arguments:
+                with patch.object(C, 'WinDLL') as native:
                     with self.assertRaises(ReplaySourceUnavailable):
                         session_timeline(session)
-                arguments.assert_not_called()
+                native.assert_not_called()
 
     def test_unbounded_unterminated_and_relative_paths_are_rejected(self):
         for change in ('length','terminator','relative'):
@@ -146,13 +183,14 @@ class RuntimeReplaySourceTests(unittest.TestCase):
             session_timeline(session)
         self.assertTrue(session.capture()['replay']['paused'])
 
-    def test_legacy_profiles_keep_the_argument_reader(self):
+    def test_unsupported_profile_never_falls_back_to_process_arguments(self):
         session = source_fixture(self.path)
         session.profile = replace(session.profile,replay_file_source_offset=None)
-        with patch('blitzcam.replay_map.launch_replay_path',return_value=self.path) as arguments:
-            actual = session_timeline(session)
-        self.assertEqual(actual['source'],'launch_argument')
-        arguments.assert_called_once_with(session.memory)
+        with patch.object(C, 'WinDLL') as native:
+            with self.assertRaisesRegex(ReplaySourceUnavailable, '尚未适配游戏内回放文件读取'):
+                session_timeline(session)
+        native.assert_not_called()
+        self.assertTrue(session.capture()['replay']['paused'])
 
 
 if __name__ == '__main__':
